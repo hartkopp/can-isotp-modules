@@ -1,5 +1,5 @@
 /*
- * $Id: sja1000.c,v 1.31 2006/03/16 15:28:51 ethuerm Exp $
+ * $Id: sja1000.c,v 2.0 2006/04/13 10:37:21 ethuerm Exp $
  *
  * sja1000.c -  Philips SJA1000 network device driver
  *
@@ -203,7 +203,7 @@ static void set_baud(struct net_device *dev, int baud, int clock)
 //	set_btr(dev, best_brp | JUMPWIDTH, (SAM << 7) | (tseg2 << 4) | tseg1);
 }
 
-static int set_reset_mode(struct net_device *dev)
+int set_reset_mode(struct net_device *dev)
 {
 	struct can_priv *priv = netdev_priv(dev);
 	unsigned char status = REG_READ(REG_MOD);
@@ -596,7 +596,7 @@ static int can_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 /*
  * SJA1000 interrupt handler
  */
-static void can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
 	struct net_device *dev = (struct net_device*)dev_id;
 	struct can_priv *priv = netdev_priv(dev);
@@ -606,13 +606,13 @@ static void can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	if (priv->state == STATE_UNINITIALIZED) {
 		printk(KERN_ERR "%s: %s: uninitialized controller!\n", dev->name, __FUNCTION__);
 		chipset_init(dev, 1); /* this should be possible at this stage */
-		return;
+		return IRQ_NONE;
 	}
 
 	if (priv->state == STATE_RESET_MODE) {
 		iiDBG(KERN_ERR "%s: %s: controller is in reset mode! MOD=0x%02X IER=0x%02X IR=0x%02X SR=0x%02X!\n",
 		      dev->name, __FUNCTION__, REG_READ(REG_MOD), REG_READ(REG_IER), REG_READ(REG_IR), REG_READ(REG_SR));
-		return;
+		return IRQ_NONE;
 	}
 
 	while ((isrc = REG_READ(REG_IR)) && (n < 20)) {
@@ -658,7 +658,7 @@ static void can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 			if (status & SR_BS) {
 				printk(KERN_INFO "%s: BUS OFF, restarting device\n", dev->name);
 				can_restart_on(dev);
-				return; /* controller has been restarted, so we leave here */
+				return IRQ_HANDLED; /* controller has been restarted, so we leave here */
 			} else if (status & SR_ES) {
 				iDBG(KERN_INFO "%s: error\n", dev->name);
 			}
@@ -681,14 +681,14 @@ static void can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 			if (priv->can_stats.bus_error_at_init + MAX_BUS_ERRORS < priv->can_stats.bus_error) {
 				iDBG(KERN_INFO "%s: heavy bus errors, restarting device\n", dev->name);
 				can_restart_on(dev);
-				return; /* controller has been restarted, so we leave here */
+				return IRQ_HANDLED; /* controller has been restarted, so we leave here */
 			}
 #if 1
 			/* don't know, if this is a good idea, but it works fine ... */
 			if (REG_READ(REG_RXERR) > 128) {
 				iDBG(KERN_INFO "%s: RX_ERR > 128, restarting device\n", dev->name);
 				can_restart_on(dev);
-				return; /* controller has been restarted, so we leave here */
+				return IRQ_HANDLED; /* controller has been restarted, so we leave here */
 			}
 #endif
 		}
@@ -701,7 +701,7 @@ static void can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 			if (status & SR_ES) {
 				iDBG(KERN_INFO "%s: -> ERROR PASSIVE, restarting device\n", dev->name);
 				can_restart_on(dev);
-				return; /* controller has been restarted, so we leave here */
+				return IRQ_HANDLED; /* controller has been restarted, so we leave here */
 			} else {
 				iDBG(KERN_INFO "%s: -> ERROR ACTIVE\n", dev->name);
 			}
@@ -720,7 +720,7 @@ static void can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 		iDBG(KERN_INFO "%s: handled %d IRQs\n", dev->name, n);
 	}
 
-	return;
+	return n == 0 ? IRQ_NONE : IRQ_HANDLED;
 }
 
 /*
@@ -808,23 +808,9 @@ static void test_if(struct net_device *dev)
 }
 #endif
 
-int sja1000_probe(struct net_device *dev)
+void sja1000_setup(struct net_device *dev)
 {
-	if (REG_READ(0) == 0xFF)
-		return -ENODEV;
-
-	/* set chip into reset mode */
-	set_reset_mode(dev);
-
-	/* go into Pelican mode, disable clkout, disable comparator */
-	REG_WRITE(REG_CDR, 0xCF);
-
-	/* output control */
-	/* connected to external transceiver */
-	REG_WRITE(REG_OCR, 0x1A);
-
-	printk(KERN_INFO "%s: %s found at 0x%X, irq is %d\n",
-	       dev->name, chip_name, (uint32_t)dev->base_addr, dev->irq);
+	struct can_priv *priv = netdev_priv(dev);
 
 	/* Fill in the the fields of the device structure
 	   with CAN/LLCF generic values */
@@ -854,9 +840,8 @@ int sja1000_probe(struct net_device *dev)
 	dev->tx_timeout		= can_tx_timeout;
 	dev->watchdog_timeo	= TX_TIMEOUT;
 
-	SET_MODULE_OWNER(dev);
+	init_timer(&priv->timer);
+	priv->timer.expires = 0;
 
-	//test_if(dev);
-
-	return 0;
+	//	SET_MODULE_OWNER(dev);
 }

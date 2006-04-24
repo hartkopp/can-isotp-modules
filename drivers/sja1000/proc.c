@@ -1,5 +1,5 @@
 /*
- * $Id: proc.c,v 1.3 2006/03/16 15:28:51 ethuerm Exp $
+ * $Id: proc.c,v 2.0 2006/04/13 10:37:21 ethuerm Exp $
  *
  * proc.c -  proc file system functions for SJA1000 CAN driver.
  *
@@ -69,8 +69,6 @@ static int sja1000_proc_read(char *page, char **start, off_t off, int count, int
 	struct can_priv *priv;
 	unsigned char stat;
 
-	MOD_INC_USE_COUNT;
-
 	len += snprintf(page + len, PAGE_SIZE - len, "CAN bus device statistics:\n");
 	len += snprintf(page + len, PAGE_SIZE - len, "       errwarn  overrun   wakeup   buserr   errpass  arbitr   restarts clock        baud\n");
 	for (i = 0; (i < max_devices) && (len < PAGE_SIZE - 200); i++) {
@@ -100,8 +98,6 @@ static int sja1000_proc_read(char *page, char **start, off_t off, int count, int
 		}
 	}
 
-	MOD_DEC_USE_COUNT;
-
 	*eof = 1;
 	return len;
 }
@@ -112,8 +108,6 @@ static int sja1000_proc_read_regs(char *page, char **start, off_t off, int count
 	struct net_device *dev;
 	int i;
 	struct can_priv	  *priv;
-
-	MOD_INC_USE_COUNT;
 
 	len = sprintf(page, "SJA1000 registers:\n");
 	for (i = 0; (i < max_devices) && (len < PAGE_SIZE - 200); i++) {
@@ -161,8 +155,6 @@ static int sja1000_proc_read_regs(char *page, char **start, off_t off, int count
 		}
 	}
 
-	MOD_DEC_USE_COUNT;
-
 	*eof = 1;
 	return len;
 }
@@ -173,8 +165,6 @@ static int sja1000_proc_read_reset(char *page, char **start, off_t off, int coun
 	struct net_device *dev;
 	int i;
 	struct can_priv   *priv;
-
-	MOD_INC_USE_COUNT;
 
 	len += snprintf(page + len, PAGE_SIZE - len, "resetting ");
 	for (i = 0; (i < max_devices) && (len < PAGE_SIZE - 200); i++) {
@@ -195,8 +185,6 @@ static int sja1000_proc_read_reset(char *page, char **start, off_t off, int coun
 	}
 
 	len += snprintf(page + len, PAGE_SIZE - len, "done\n");
-
-	MOD_DEC_USE_COUNT;
 
 	*eof = 1;
 	return len;

@@ -1,5 +1,5 @@
 /*
- * $Id: sja1000.h,v 1.14 2006/03/15 10:05:17 ethuerm Exp $
+ * $Id: sja1000.h,v 2.0 2006/04/13 10:37:21 ethuerm Exp $
  *
  * sja1000.h -  Philips SJA1000 network device driver
  *
@@ -159,9 +159,6 @@
 #define SJA1000_CHIP_NAME "sja1000"
 #define PROCBASE          "net/drivers" /* /proc/ ... */
 
-/* For compatability with Linux 2.6 */
-#define netdev_priv(dev) ((dev)->priv)
-
 /*
  * private data structure:
  * reg_read and reg_write are functions to access the sja1000 registers
@@ -190,7 +187,7 @@ struct can_priv {
 #define STATE_BUS_OFF		5
 #define STATE_RESET_MODE	6
 
-int  sja1000_probe(struct net_device *dev);
+void sja1000_setup(struct net_device *dev);
 void sja1000_proc_init(const char *drv_name, struct net_device **dev, int max);
 void sja1000_proc_delete(const char *drv_name);
 

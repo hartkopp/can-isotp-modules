@@ -43,6 +43,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/version.h>
 #include <linux/init.h>
 #include <linux/net.h>
 #include <linux/netdevice.h>
@@ -54,7 +55,7 @@
 #include "version.h"
 #include "raw.h"
 
-RCSID("$Id: raw.c,v 1.59 2006/04/05 08:07:00 ethuerm Exp $");
+RCSID("$Id: raw.c,v 2.0 2006/04/13 10:37:19 ethuerm Exp $");
 
 
 #define NAME "RAW sockets for LLCF"
@@ -66,8 +67,8 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>");
 
 #ifdef DEBUG
-MODULE_PARM(debug, "1i");
 static int debug = 0;
+module_param(debug, int, S_IRUGO);
 #define DBG(args...)       (debug & 1 ? \
 	                       (printk(KERN_DEBUG "RAW %s: ", __func__), \
 			        printk(args)) : 0)
@@ -87,28 +88,15 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 			  char *optval, int optlen);
 static int raw_getsockopt(struct socket *sock, int level, int optname,
 			  char *optval, int *optlen);
-static int raw_sendmsg(struct socket *sock, struct msghdr *msg, int size,
-		       struct scm_cookie *scm);
-static int raw_recvmsg(struct socket *sock, struct msghdr *msg, int size,
-		       int flags, struct scm_cookie *scm);
+static int raw_sendmsg(struct kiocb *iocb, struct socket *sock,
+		       struct msghdr *msg, size_t size);
+static int raw_recvmsg(struct kiocb *iocb, struct socket *sock,
+		       struct msghdr *msg, size_t size, int flags);
 static void raw_rcv(struct sk_buff *skb, void *data);
 static void raw_notifier(unsigned long msg, void *data);
 
 static void raw_add_filters(struct net_device *dev, struct sock *sk);
 static void raw_remove_filters(struct net_device *dev, struct sock *sk);
-
-/*  this struct is part of struct sock in the place of union tp_pinfo,
- *  which is initialized to zero for each newly allocated struct sock.
- */
-
-struct canraw_opt {
-    int bound;
-    int ifindex;
-    int count;
-    struct can_filter *filter;
-};
-
-#define canraw_sk(sk) ((struct canraw_opt *)&(sk)->tp_pinfo)
 
 
 static struct proto_ops raw_ops = {
@@ -131,11 +119,52 @@ static struct proto_ops raw_ops = {
     .sendpage      = sock_no_sendpage,
 };
 
+
+struct raw_opt {
+    int bound;
+    int ifindex;
+    int count;
+    struct can_filter *filter;
+};
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,13)
+
+struct raw_sock {
+    struct sock    sk;
+    struct raw_opt opt;
+};
+
+#define canraw_sk(sk) (&((struct raw_sock *)(sk))->opt)
+
+static struct proto raw_proto = {
+    .name     = "CAN_RAW",
+    .owner    = THIS_MODULE,
+    .obj_size = sizeof(struct raw_sock),
+};
+
+static struct can_proto raw_can_proto = {
+    .ops  = &raw_ops,
+    .prot = &raw_proto,
+};
+
+#else
+
+#define canraw_sk(sk) ((struct raw_opt *)(sk)->sk_protinfo)
+
+static struct can_proto raw_can_proto = {
+    .ops      = &raw_ops,
+    .owner    = THIS_MODULE,
+    .obj_size = sizeof(struct raw_opt),
+};
+
+#endif
+
+
 static __init int raw_init(void)
 {
     printk(banner);
 
-    can_proto_register(CAN_RAW, &raw_ops);
+    can_proto_register(CAN_RAW, &raw_can_proto);
     return 0;
 }
 
@@ -149,7 +178,8 @@ static int raw_release(struct socket *sock)
     struct sock *sk = sock->sk;
     struct net_device *dev = NULL;
 
-    DBG("socket %p, sk %p\n", sock, sk);
+    DBG("socket %p, sk %p, refcnt %d\n", sock, sk,
+	atomic_read(&sk->sk_refcnt));
 
     if (canraw_sk(sk)->bound && canraw_sk(sk)->ifindex)
 	dev = dev_get_by_index(canraw_sk(sk)->ifindex);
@@ -211,8 +241,8 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 	    return -ENODEV;
 	}
 	if (!(dev->flags & IFF_UP)) {
-	    sk->err = ENETDOWN;
-	    sk->error_report(sk);
+	    sk->sk_err = ENETDOWN;
+	    sk->sk_error_report(sk);
 	    goto out;
 	}
 	can_dev_register(dev, raw_notifier, sk);
@@ -386,8 +416,8 @@ static void raw_remove_filters(struct net_device *dev, struct sock *sk)
     }
 }
 
-static int raw_sendmsg(struct socket *sock, struct msghdr *msg, int size,
-		       struct scm_cookie *scm)
+static int raw_sendmsg(struct kiocb *iocb, struct socket *sock,
+		       struct msghdr *msg, size_t size)
 {
     struct sock *sk = sock->sk;
     struct sk_buff *skb;
@@ -430,8 +460,8 @@ static int raw_sendmsg(struct socket *sock, struct msghdr *msg, int size,
     return size;
 }
 
-static int raw_recvmsg(struct socket *sock, struct msghdr *msg, int size,
-		       int flags, struct scm_cookie *scm)
+static int raw_recvmsg(struct kiocb *iocb, struct socket *sock,
+		       struct msghdr *msg, size_t size, int flags)
 {
     struct sock *sk = sock->sk;
     struct sk_buff *skb;
@@ -503,8 +533,8 @@ static void raw_notifier(unsigned long msg, void *data)
 	canraw_sk(sk)->ifindex = 0;
 	/* fallthrough */
     case NETDEV_DOWN:
-	sk->err = ENETDOWN;
-	sk->error_report(sk);
+	sk->sk_err = ENETDOWN;
+	sk->sk_error_report(sk);
 	break;
     }
 }

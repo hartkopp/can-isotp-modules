@@ -1,5 +1,5 @@
 /*
- * $Id: isa.c,v 1.5 2006/03/17 08:36:13 ethuerm Exp $
+ * $Id: isa.c,v 2.0 2006/04/13 10:37:21 ethuerm Exp $
  *
  * isa.c - Philips SJA1000 network device driver for ISA CAN-Cards
  *
@@ -127,23 +127,18 @@ static struct net_device* sja1000_isa_probe(uint32_t base, int irq, int speed,
 	struct net_device	*dev;
 	struct can_priv		*priv;
 
-	if (!(dev = kmalloc(sizeof(struct net_device), GFP_KERNEL))) {
+	if (!(dev = alloc_netdev(sizeof(struct can_priv), CAN_DEV_NAME,
+				 sja1000_setup))) {
 		printk(KERN_ERR "%s: out of memory\n", chip_name);
 		return NULL;
 	}
-	memset(dev, 0, sizeof(struct net_device));
-
-	if (!(priv = kmalloc(sizeof(struct can_priv), GFP_KERNEL))) {
-		printk(KERN_ERR "%s: out of memory\n", chip_name);
-		goto free_dev;
-	}
-	memset(priv, 0, sizeof(struct can_priv));
-	dev->priv = priv;
 
 	printk(KERN_INFO "%s: base 0x%X / irq %d / speed %d / btr 0x%X / rx_probe %d\n",
 	       chip_name, base, irq, speed, btr, rx_probe);
 
 	/* fill net_device structure */
+
+	priv             = netdev_priv(dev);
 
 	dev->irq         = irq;
 	dev->base_addr   = base;
@@ -158,19 +153,28 @@ static struct net_device* sja1000_isa_probe(uint32_t base, int irq, int speed,
 	priv->restart_ms = restart_ms;
 	priv->debug      = debug;
 
-	init_timer(&priv->timer);
-	priv->timer.expires = 0;
+	if (REG_READ(0) == 0xFF)
+		goto free_dev;
 
-	dev->init = sja1000_probe;
-	strcpy(dev->name, CAN_DEV_NAME);
+	/* set chip into reset mode */
+	set_reset_mode(dev);
+
+	/* go into Pelican mode, disable clkout, disable comparator */
+	REG_WRITE(REG_CDR, 0xCF);
+
+	/* output control */
+	/* connected to external transceiver */
+	REG_WRITE(REG_OCR, 0x1A);
+
+	printk(KERN_INFO "%s: %s found at 0x%X, irq is %d\n",
+	       dev->name, chip_name, (uint32_t)dev->base_addr, dev->irq);
 
 	if (register_netdev(dev) == 0)
 		return dev;
 
 	printk(KERN_INFO "%s: probing failed\n", chip_name);
-	kfree(dev->priv);
  free_dev:
-	kfree(dev);
+	free_netdev(dev);
 	return NULL;
 }
 
@@ -184,9 +188,7 @@ static __exit void sja1000_isa_cleanup_module(void)
 			unregister_netdev(can_dev[i]);
 			del_timer(&priv->timer);
 			release_region(base_addr[i], SJA1000_IO_SIZE_ISA);
-			kfree(priv);
-			kfree(can_dev[i]);
-			can_dev[i] = NULL;
+			free_netdev(can_dev[i]);
 		}
 	}
 	sja1000_proc_delete(drv_name);
@@ -211,12 +213,11 @@ static __init int sja1000_isa_init_module(void)
 	for (i = 0; base_addr[i]; i++) {
 		printk(KERN_DEBUG "%s: checking for %s on address 0x%X ...\n",
 		       chip_name, chip_name, base_addr[i]);
-		if (check_region(base_addr[i], SJA1000_IO_SIZE_ISA)) {
+		if (!request_region(base_addr[i], SJA1000_IO_SIZE_ISA, chip_name)) {
 			printk(KERN_ERR "%s: memory already in use\n", chip_name);
 			sja1000_isa_cleanup_module();
 			return -EBUSY;
 		}
-		request_region(base_addr[i], SJA1000_IO_SIZE_ISA, chip_name);
 		dev = sja1000_isa_probe(base_addr[i], irq[i], speed[i], btr[i], rx_probe[i], clk, debug, restart_ms);
 
 		if (dev != NULL) {
@@ -232,5 +233,3 @@ static __init int sja1000_isa_init_module(void)
 
 module_init(sja1000_isa_init_module);
 module_exit(sja1000_isa_cleanup_module);
-
-EXPORT_NO_SYMBOLS;

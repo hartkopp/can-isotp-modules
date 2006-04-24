@@ -1,5 +1,5 @@
 #
-#  $Id: Makefile,v 1.20 2006/03/07 07:47:42 ethuerm Exp $
+#  $Id: Makefile,v 2.0 2006/04/13 10:37:19 ethuerm Exp $
 #
 #  Copyright (c) 2002-2005 Volkswagen Group Electronic Research
 #  All rights reserved.
@@ -41,66 +41,32 @@
 #  Send feedback to <llcf@volkswagen.de>
 
 
-CFLAGS    = -O2 -Wall -Wno-parentheses -D__KERNEL__ -DMODULE $(DEBUG) \
-		-I$(KERNELDIR)/include -fno-strict-aliasing
-KERNELDIR = /usr/src/linux
 
-VERSION       = $(shell awk '/^VERSION/     {print $$3}' $(KERNELDIR)/Makefile)
-PATCHLEVEL    = $(shell awk '/^PATCHLEVEL/  {print $$3}' $(KERNELDIR)/Makefile)
-SUBLEVEL      = $(shell awk '/^SUBLEVEL/    {print $$3}' $(KERNELDIR)/Makefile)
-EXTRAVERSION  = $(shell awk '/^EXTRAVERSION/{print $$3}' $(KERNELDIR)/Makefile)
-KERNELRELEASE = $(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)
-
-MODLIB := $(INSTALL_MOD_PATH)/lib/modules/$(KERNELRELEASE)/llcf
-
-MOD_GPL = can.o vcan.o can-bcm.o can-raw.o
+MOD_GPL = can.o vcan.o can-raw.o can-bcm.o
 MOD_VW  = can-tpgen.o can-tp20.o can-tp16.o can-mcnet.o
 
-default: all-gpl
+ifeq ($(KERNELRELEASE),)
 
-all: all-gpl all-vw
+KERNELDIR = /usr/src/linux
+PWD       = $(shell pwd)
 
-all-gpl: $(MOD_GPL)
-
-all-vw: $(MOD_VW)
-
-ifeq "$(strip $(INSTALL_MOD_PATH))" ""
-DEPMOD_BASE :=
-else
-DEPMOD_BASE := -r -b $(INSTALL_MOD_PATH)
-endif
-
-install: $(MOD_GPL)
-	install -m 755 -d $(MODLIB)
-	install -m 644 $^ $(MODLIB)
-	depmod -ae -F $(KERNELDIR)/System.map $(DEPMOD_BASE) $(KERNELRELEASE)
-
-install-vw: $(MOD_VW)
-	install -m 755 -d $(MODLIB)
-	install -m 644 $^ $(MODLIB)
-	depmod -ae -F $(KERNELDIR)/System.map $(DEPMOD_BASE) $(KERNELRELEASE)
+default:
+	$(MAKE) -C $(KERNELDIR) SUBDIRS=$(PWD) modules
 
 clean:
-	rm -f *.o
+	$(MAKE) -C $(KERNELDIR) SUBDIRS=$(PWD) clean
 
-can.o: af_can.o proc.o
-	$(LD) -r -o $@ $^
+else
 
-can-bcm.o: bcm.o
-	$(LD) -r -o $@ $^
+obj-m := $(MOD_GPL)
 
-can-raw.o: raw.o
-	$(LD) -r -o $@ $^
+can-objs       := af_can.o proc.o
+can-bcm-objs   := bcm.o
+can-raw-objs   := raw.o
 
-can-tpgen.o: tp_gen.o
-	$(LD) -r -o $@ $^
+can-tpgen-objs := tp_gen.o
+can-tp20-objs  := tp20.o
+can-tp16-objs  := tp16.o
+can-mcnet-objs := mcnet.o
 
-can-tp20.o: tp20.o
-	$(LD) -r -o $@ $^
-
-can-tp16.o: tp16.o
-	$(LD) -r -o $@ $^
-
-can-mcnet.o: mcnet.o
-	$(LD) -r -o $@ $^
-
+endif

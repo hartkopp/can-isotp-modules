@@ -48,7 +48,7 @@
 #include "af_can.h"
 #include "version.h"
 
-RCSID("$Id: proc.c,v 1.2 2006/02/09 13:03:20 hartko Exp $");
+RCSID("$Id: proc.c,v 2.0 2006/04/13 10:37:19 ethuerm Exp $");
 
 /* proc filenames */
 
@@ -217,8 +217,6 @@ int can_proc_read_stats(char *page, char **start, off_t off, int count, int *eof
 {
     int len = 0;
 
-    MOD_INC_USE_COUNT;
-
     len += snprintf(page + len, PAGE_SIZE - len, "\n");
     len += snprintf(page + len, PAGE_SIZE - len, " %8ld transmitted frames (TXF)\n",
 		    stats.tx_frames);
@@ -267,8 +265,6 @@ int can_proc_read_stats(char *page, char **start, off_t off, int count, int *eof
 
     len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
-    MOD_DEC_USE_COUNT;
-
     *eof = 1;
     return len;
 }
@@ -277,13 +273,9 @@ int can_proc_read_reset_stats(char *page, char **start, off_t off, int count, in
 {
     int len = 0;
 
-    MOD_INC_USE_COUNT;
-
     can_init_stats(1);
 
     len += snprintf(page + len, PAGE_SIZE - len, "CAN statistic reset #%ld done.\n", pstats.stats_reset);
-
-    MOD_DEC_USE_COUNT;
 
     *eof = 1;
     return len;
@@ -293,13 +285,9 @@ int can_proc_read_version(char *page, char **start, off_t off, int count, int *e
 {
     int len = 0;
 
-    MOD_INC_USE_COUNT;
-
     len += snprintf(page + len, PAGE_SIZE - len,
 		    "%06X [ Volkswagen AG - Low Level CAN Framework (LLCF) v%s ]\n",
 		    LLCF_VERSION_CODE, VERSION);
-
-    MOD_DEC_USE_COUNT;
 
     *eof = 1;
     return len;
@@ -309,8 +297,6 @@ int can_proc_read_rcvlist_all(char *page, char **start, off_t off, int count, in
 {
     int len = 0;
     struct rcv_dev_list *p;
-
-    MOD_INC_USE_COUNT;
 
     /* RX_ALL */
     len += snprintf(page + len, PAGE_SIZE - len, "\nreceive list 'rx_all':\n");
@@ -328,8 +314,6 @@ int can_proc_read_rcvlist_all(char *page, char **start, off_t off, int count, in
 
     len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
-    MOD_DEC_USE_COUNT;
-
     *eof = 1;
     return len;
 }
@@ -338,8 +322,6 @@ int can_proc_read_rcvlist_fil(char *page, char **start, off_t off, int count, in
 {
     int len = 0;
     struct rcv_dev_list *p;
-
-    MOD_INC_USE_COUNT;
 
     /* RX_FIL */
     len += snprintf(page + len, PAGE_SIZE - len, "\nreceive list 'rx_fil':\n");
@@ -357,8 +339,6 @@ int can_proc_read_rcvlist_fil(char *page, char **start, off_t off, int count, in
 
     len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
-    MOD_DEC_USE_COUNT;
-
     *eof = 1;
     return len;
 }
@@ -367,8 +347,6 @@ int can_proc_read_rcvlist_inv(char *page, char **start, off_t off, int count, in
 {
     int len = 0;
     struct rcv_dev_list *p;
-
-    MOD_INC_USE_COUNT;
 
     /* RX_INV */
     len += snprintf(page + len, PAGE_SIZE - len, "\nreceive list 'rx_inv':\n");
@@ -386,8 +364,6 @@ int can_proc_read_rcvlist_inv(char *page, char **start, off_t off, int count, in
 
     len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
-    MOD_DEC_USE_COUNT;
-
     *eof = 1;
     return len;
 }
@@ -398,8 +374,6 @@ int can_proc_read_rcvlist_sff(char *page, char **start, off_t off, int count, in
     unsigned long id = 0;
     int i;
     struct rcv_dev_list *p;
-
-    MOD_INC_USE_COUNT;
 
     /* RX_SFF */
     len += snprintf(page + len, PAGE_SIZE - len, "\nreceive list 'rx_sff':\n");
@@ -423,8 +397,6 @@ int can_proc_read_rcvlist_sff(char *page, char **start, off_t off, int count, in
 
     len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
-    MOD_DEC_USE_COUNT;
-
     *eof = 1;
     return len;
 }
@@ -433,8 +405,6 @@ int can_proc_read_rcvlist_eff(char *page, char **start, off_t off, int count, in
 {
     int len = 0;
     struct rcv_dev_list *p;
-
-    MOD_INC_USE_COUNT;
 
     /* RX_EFF */
     len += snprintf(page + len, PAGE_SIZE - len, "\nreceive list 'rx_eff':\n");
@@ -451,8 +421,6 @@ int can_proc_read_rcvlist_eff(char *page, char **start, off_t off, int count, in
     }
 
     len += snprintf(page + len, PAGE_SIZE - len, "\n");
-
-    MOD_DEC_USE_COUNT;
 
     *eof = 1;
     return len;

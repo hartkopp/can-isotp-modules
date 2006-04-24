@@ -47,10 +47,11 @@
 
 #ifdef __KERNEL__
 #include "version.h"
-RCSID("$Id: af_can.h,v 1.11 2006/04/05 08:07:00 ethuerm Exp $");
+RCSID("$Id: af_can.h,v 2.0 2006/04/13 10:37:19 ethuerm Exp $");
 #endif
 
 #ifdef __KERNEL__
+#include <linux/version.h>
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
 #include <linux/proc_fs.h>
@@ -96,7 +97,20 @@ struct can_filter {
 
 #define CAN_PROC_DIR "sys/net/can" /* /proc/... */
 
-void can_proto_register(int proto, struct proto_ops *ops);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,13)
+struct can_proto {
+    struct proto_ops *ops;
+    struct proto     *prot;
+};
+#else
+struct can_proto {
+    struct proto_ops *ops;
+    struct module    *owner;
+    size_t           obj_size;
+};
+#endif
+
+void can_proto_register(int proto, struct can_proto *cp);
 void can_proto_unregister(int proto);
 void can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 	void (*func)(struct sk_buff *, void *), void *data, char *ident);

@@ -1,5 +1,5 @@
 #
-#  $Id: Makefile,v 1.12 2006/03/15 10:05:17 ethuerm Exp $
+#  $Id: Makefile,v 2.0 2006/04/13 10:37:21 ethuerm Exp $
 #
 #  Copyright (c) 2002-2005 Volkswagen Group Electronic Research
 #  All rights reserved.
@@ -40,35 +40,22 @@
 #
 #  Send feedback to <llcf@volkswagen.de>
 
-CFLAGS    = -O2 -Wall -Wno-parentheses -D__KERNEL__ -I../../can \
-		-DMODULE -I$(KERNELDIR)/include \
-		-fno-strict-aliasing
+ifeq ($(KERNELRELEASE),)
 
 KERNELDIR = /usr/src/linux
+PWD       = $(shell pwd)
 
-ISATARGET = sja1000-isa.o
-ISASRC = isa.c sja1000.c proc.c
-
-GW2TARGET = sja1000-gw2.o
-GW2SRC = trajet-gw2.c sja1000.c proc.c
-
-all: .depend $(ISATARGET) $(GW2TARGET)
-
-$(ISATARGET): $(ISASRC:.c=.o)
-	$(LD) -r $^ -o $@
-
-$(GW2TARGET): $(GW2SRC:.c=.o)
-	$(LD) -r $^ -o $@
+default:
+	$(MAKE) -C $(KERNELDIR) SUBDIRS=$(PWD) modules
 
 clean:
-	rm -f *.o *~ core $(ISATARGET) $(GW2TARGET)
+	$(MAKE) -C $(KERNELDIR) SUBDIRS=$(PWD) clean
 
-distclean: clean
-	rm -f .depend
+else
 
-depend .depend dep:
-	$(CC) $(CFLAGS) -M *.c > .depend
+obj-m := sja1000-isa.o sja1000-gw2.o
 
-ifeq (.depend,$(wildcard .depend))
-include .depend
+sja1000-isa-objs := isa.o        sja1000.o proc.o
+sja1000-gw2-objs := trajet-gw2.o sja1000.o proc.o
+
 endif

@@ -50,7 +50,7 @@
 #include "af_can.h"
 #include "version.h"
 
-RCSID("$Id: vcan.c,v 1.34 2006/04/05 08:07:01 ethuerm Exp $");
+RCSID("$Id: vcan.c,v 2.0 2006/04/13 10:37:20 ethuerm Exp $");
 
 
 #define NAME "VCAN loopback interface for LLCF"
@@ -61,8 +61,8 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>");
 
 #ifdef DEBUG
-MODULE_PARM(debug, "1i");
 static int debug = 0;
+module_param(debug, int, S_IRUGO);
 #define DBG(args...)       (debug & 1 ? \
 	                       (printk(KERN_DEBUG "VCAN %s: ", __func__), \
 			        printk(args)) : 0)
@@ -80,17 +80,7 @@ static int debug = 0;
 
 #define NDEVICES 4
 
-/* For compatability with Linux 2.6 */
-#define netdev_priv(dev) ((dev)->priv)
-
-static int vcan_init(struct net_device *dev);
-
-static struct net_device vcan_devs[NDEVICES] = {
-    { .init = vcan_init, .name = "vcan%d" },
-    { .init = vcan_init, .name = "vcan%d" },
-    { .init = vcan_init, .name = "vcan%d" },
-    { .init = vcan_init, .name = "vcan%d" },
-};
+static struct net_device *vcan_devs[NDEVICES];
 
 static int vcan_open(struct net_device *dev)
 {
@@ -190,15 +180,12 @@ static struct net_device_stats *vcan_get_stats(struct net_device *dev)
     return stats;
 }
 
-static int vcan_init(struct net_device *dev)
+static void vcan_init(struct net_device *dev)
 {
     DBG("dev %s\n", dev->name);
 
     ether_setup(dev);
 
-    dev->priv              = kmalloc(sizeof(struct net_device_stats), GFP_KERNEL);
-    if (!dev->priv)
-	return -ENOMEM;
     memset(dev->priv, 0, sizeof(struct net_device_stats));
 
     dev->open              = vcan_open;
@@ -216,8 +203,6 @@ static int vcan_init(struct net_device *dev)
     dev->type              = ARPHRD_LOOPBACK;
 
     SET_MODULE_OWNER(dev);
-
-    return 0;
 }
 
 static __init int vcan_init_module(void)
@@ -227,11 +212,15 @@ static __init int vcan_init_module(void)
     printk(banner);
 
     for (i = 0; i < NDEVICES; i++) {
-	if (result = register_netdev(vcan_devs + i))
+	if (!(vcan_devs[i] = alloc_netdev(sizeof(struct net_device_stats),
+					  "vcan%d", vcan_init)))
+	    printk(KERN_ERR "vcan: error allocating net_device\n");
+	else if (result = register_netdev(vcan_devs[i])) {
 	    printk(KERN_ERR "vcan: error %d registering interface %s\n",
-		   result, vcan_devs[i].name);
-	else {
-	    DBG("successfully registered interface %s\n", vcan_devs[i].name);
+		   result, vcan_devs[i]->name);
+	    free_netdev(vcan_devs[i]);
+	} else {
+	    DBG("successfully registered interface %s\n", vcan_devs[i]->name);
 	    ndev++;
 	}
     }
@@ -241,8 +230,10 @@ static __init int vcan_init_module(void)
 static __exit void vcan_cleanup_module(void)
 {
     int i;
-    for (i = 0; i < NDEVICES; i++)
-	unregister_netdev(vcan_devs + i);
+    for (i = 0; i < NDEVICES; i++) {
+	unregister_netdev(vcan_devs[i]);
+	free_netdev(vcan_devs[i]);
+    }
 }
 
 module_init(vcan_init_module);

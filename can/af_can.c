@@ -42,9 +42,8 @@
  *
  */
 
-#define EXPORT_SYMTAB
-
 #include <linux/module.h>
+#include <linux/version.h>
 #include <linux/kmod.h>
 #include <linux/init.h>
 #include <linux/spinlock.h>
@@ -58,7 +57,7 @@
 #include "af_can.h"
 #include "version.h"
 
-RCSID("$Id: af_can.c,v 1.26 2006/04/10 09:37:39 ethuerm Exp $");
+RCSID("$Id: af_can.c,v 2.0 2006/04/13 10:37:19 ethuerm Exp $");
 
 #define NAME "Volkswagen AG - Low Level CAN Framework (LLCF)"
 #define IDENT "af_can"
@@ -69,12 +68,12 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>, "
 	      "Oliver Hartkopp <oliver.hartkopp@volkswagen.de>");
 
-MODULE_PARM(stats_timer, "1i");
 int stats_timer = 1; /* default: on */
+module_param(stats_timer, int, S_IRUGO);
 
 #ifdef DEBUG
-MODULE_PARM(debug, "1i");
 static int debug = 0;
+module_param(debug, int, S_IRUGO);
 #define DBG(args...)       (debug & 1 ? \
 	                       (printk(KERN_DEBUG "CAN %s: ", __func__), \
 			        printk(args)) : 0)
@@ -93,8 +92,13 @@ static int can_create(struct socket *sock, int protocol);
 static int can_notifier(struct notifier_block *nb,
 			unsigned long msg, void *data);
 static int can_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,14)
+static int can_rcv(struct sk_buff *skb, struct net_device *dev,
+		   struct packet_type *pt, struct net_device *orig_dev);
+#else
 static int can_rcv(struct sk_buff *skb, struct net_device *dev,
 		   struct packet_type *pt);
+#endif
 static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb);
 static struct rcv_list **find_rcv_list(canid_t *can_id, canid_t *mask, struct net_device *dev);
 
@@ -120,13 +124,14 @@ static struct packet_type can_packet = {
 static struct net_proto_family can_family_ops = {
     .family = PF_CAN,
     .create = can_create,
+    .owner  = THIS_MODULE,
 };
 
 static struct notifier_block can_netdev_notifier = {
     .notifier_call = can_notifier,
 };
 
-static struct proto_ops *proto_tab[CAN_MAX];
+static struct can_proto *proto_tab[CAN_MAX];
 
 extern struct timer_list stattimer; /* timer for statistics update */
 extern struct s_stats  stats;       /* statistics */
@@ -179,7 +184,7 @@ static __exit void can_exit(void)
 /* af_can protocol functions                      */
 /**************************************************/
 
-void can_proto_register(int proto, struct proto_ops *ops)
+void can_proto_register(int proto, struct can_proto *cp)
 {
     if (proto < 0 || proto >= CAN_MAX) {
 	printk(KERN_ERR "CAN: protocol number %d out of range\n", proto);
@@ -189,19 +194,30 @@ void can_proto_register(int proto, struct proto_ops *ops)
 	printk(KERN_ERR "CAN: protocol %d already registered\n", proto);
 	return;
     }
-    proto_tab[proto] = ops;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,13)
+    if (proto_register(cp->prot, 0) != 0) {
+	return;
+    }
+#endif
+    proto_tab[proto] = cp;
 
     /* use our generic ioctl function if the module doesn't bring its own */
-    if (!ops->ioctl)
-	ops->ioctl = can_ioctl;
+    if (!cp->ops->ioctl)
+	cp->ops->ioctl = can_ioctl;
 }
 
 void can_proto_unregister(int proto)
 {
-    if (!proto_tab[proto]) {
+    struct can_proto *cp;
+
+    if (!(cp = proto_tab[proto])) {
 	printk(KERN_ERR "CAN: protocol %d is not registered\n", proto);
 	return;
     }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,13)
+    proto_unregister(cp->prot);
+#endif
     proto_tab[proto] = NULL;
 }
 
@@ -243,12 +259,17 @@ void can_dev_unregister(struct net_device *dev,
 
 static void can_sock_destruct(struct sock *sk)
 {
-    skb_queue_purge(&sk->receive_queue);
+    DBG("called for sock %p\n", sk);
+
+    skb_queue_purge(&sk->sk_receive_queue);
+    if (sk->sk_protinfo)
+	kfree(sk->sk_protinfo);
 }
 
 static int can_create(struct socket *sock, int protocol)
 {
     struct sock *sk;
+    struct can_proto *cp;
 
     DBG("socket %p, type %d, proto %d\n", sock, sock->type, protocol);
 
@@ -304,16 +325,28 @@ static int can_create(struct socket *sock, int protocol)
     }
 
     /* check for success */
-    if (!proto_tab[protocol])
+    if (!(cp = proto_tab[protocol]))
 	return -EPROTONOSUPPORT;
 
-    sock->ops = proto_tab[protocol];
+    sock->ops = cp->ops;
 
-    if (!(sk = sk_alloc(PF_CAN, GFP_KERNEL, 1)))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,13)
+    sk = sk_alloc(PF_CAN, GFP_KERNEL, cp->prot, 1);
+    if (!sk)
 	goto oom;
-
+#else
+    sk = sk_alloc(PF_CAN, GFP_KERNEL, 1, 0);
+    if (!sk)
+	goto oom;
+    if (cp->obj_size &&
+	!(sk->sk_protinfo = kmalloc(cp->obj_size, GFP_KERNEL))) {
+	sk_free(sk);
+	goto oom;
+    }
+    sk_set_owner(sk, proto_tab[protocol]->owner);
+#endif
     sock_init_data(sock, sk);
-    sk->destruct = can_sock_destruct;
+    sk->sk_destruct = can_sock_destruct;
 
     DBG("created sock: %p\n", sk);
 
@@ -340,18 +373,17 @@ static int can_notifier(struct notifier_block *nb,
 
 static int can_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 {
-    int err;
     struct sock *sk = sock->sk;
 
     switch (cmd) {
     case SIOCGSTAMP:
-	if (sk->stamp.tv_sec == 0)
-	    return -ENOENT;
-	if (err = copy_to_user((void *)arg, &sk->stamp, sizeof(sk->stamp)))
-	    return err;
-	break;
+	return sock_get_timestamp(sk, (struct timeval __user *)arg);
     default:
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,16)
+	return -ENOIOCTLCMD;
+#else
 	return dev_ioctl(cmd, (void *)arg);
+#endif
     }
     return 0;
 }
@@ -486,8 +518,13 @@ out:
     write_unlock(&rcv_lists_lock);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,14)
+static int can_rcv(struct sk_buff *skb, struct net_device *dev,
+		   struct packet_type *pt, struct net_device *orig_dev)
+#else
 static int can_rcv(struct sk_buff *skb, struct net_device *dev,
 		   struct packet_type *pt)
+#endif
 {
     struct rcv_dev_list *q;
     int matches;
@@ -754,17 +791,14 @@ void can_debug_skb(struct sk_buff *skb)
     printk(buf);
 }
 
-#ifdef EXPORT_SYMTAB
 EXPORT_SYMBOL(can_debug_cframe);
 EXPORT_SYMBOL(can_debug_skb);
-#endif
 
 #endif
 
 /**************************************************/
 /* Exported symbols                               */
 /**************************************************/
-#ifdef EXPORT_SYMTAB
 EXPORT_SYMBOL(can_proto_register);
 EXPORT_SYMBOL(can_proto_unregister);
 EXPORT_SYMBOL(can_rx_register);
@@ -773,4 +807,3 @@ EXPORT_SYMBOL(can_dev_register);
 EXPORT_SYMBOL(can_dev_unregister);
 EXPORT_SYMBOL(can_send);
 EXPORT_SYMBOL(timeval2jiffies);
-#endif
