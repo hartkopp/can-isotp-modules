@@ -73,6 +73,4 @@ enum {
 #define TX_RESET_MULTI_IDX  0x0200
 #define RX_RTR_FRAME        0x0400
 
-#define CMD_ERROR    0x8000
-
 #endif /* CAN_BCM_H */
