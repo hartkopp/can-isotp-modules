@@ -1469,24 +1469,44 @@ static void bcm_notifier(unsigned long msg, struct sock *sk,
 			 struct net_device *dev)
 {
 	struct bcm_opt *bo = bcm_sk(sk);
+	struct bcm_op *op, *next;
 
 	DBG("msg %ld sk %p dev %p"
 	    " dev->ifindex %d bo->ifindex %d\n",
 	    __func__, msg, sk, dev, dev->ifindex, bo->ifindex);
 
-	if (bo->ifindex != dev->ifindex)
-		return;
-
 	switch (msg) {
 
 	case NETDEV_UNREGISTER:
-		bo->bound   = 0;
-		bo->ifindex = 0;
-		/* fallthrough */
-	case NETDEV_DOWN:
-		sk->sk_err = ENETDOWN;
+		lock_sock(sk);
+
+		/* remove device specific receive entries */
+		list_for_each_entry_safe(op, next, &bo->rx_ops, list)
+			if (op->ifindex == dev->ifindex)
+				can_rx_unregister(dev, op->can_id,
+						  REGMASK(op->can_id),
+						  bcm_rx_handler, op);
+
+		/* remove device reference, if this is our bound device */
+		if (bo->bound && bo->ifindex == dev->ifindex) {
+			dev_put(dev);
+
+			bo->bound   = 0;
+			bo->ifindex = 0;
+		}
+
+		release_sock(sk);
+		sk->sk_err = ENODEV;
 		if (!sock_flag(sk, SOCK_DEAD))
 			sk->sk_error_report(sk);
+		break;
+
+	case NETDEV_DOWN:
+		if (bo->ifindex == dev->ifindex) {
+			sk->sk_err = ENETDOWN;
+			if (!sock_flag(sk, SOCK_DEAD))
+				sk->sk_error_report(sk);
+		}
 	}
 }
 
@@ -1509,6 +1529,8 @@ static int bcm_init(struct sock *sk)
 	bo->notifier.func    = bcm_notifier;
 	bo->notifier.sk      = sk;
 
+	can_register_notifier(&bo->notifier);
+
 	return 0;
 }
 
@@ -1524,6 +1546,8 @@ static int bcm_release(struct socket *sock)
 	DBG("socket %p, sk %p\n", sock, sk);
 
 	/* remove bcm_ops, timer, rx_unregister(), etc. */
+
+	lock_sock(sk);
 
 	list_for_each_entry_safe(op, next, &bo->tx_ops, list) {
 		DBG("removing tx_op %p for can_id %03X\n", op, op->can_id);
@@ -1559,16 +1583,21 @@ static int bcm_release(struct socket *sock)
 	if (proc_dir && bo->bcm_proc_read)
 		remove_proc_entry(bo->procname, proc_dir);
 
-	/* remove device notifier */
-	if (bo->ifindex) {
+	/* remove device reference */
+	if (bo->bound && bo->ifindex) {
 		struct net_device *dev = dev_get_by_index(bo->ifindex);
 
 		if (dev) {
-			can_unregister_notifier(&bo->notifier);
+			dev_put(dev);
 			dev_put(dev);
 		}
+		bo->bound   = 0;
+		bo->ifindex = 0;
 	}
 
+	release_sock(sk);
+
+	can_unregister_notifier(&bo->notifier);
 	sock_put(sk);
 
 	return 0;
@@ -1594,8 +1623,7 @@ static int bcm_connect(struct socket *sock, struct sockaddr *uaddr, int len,
 			return -ENODEV;
 		}
 		bo->ifindex = dev->ifindex;
-		can_register_notifier(&bo->notifier);
-		dev_put(dev);
+		/* hold reference to 'dev' until bcm_release() */
 
 		DBG("socket %p bound to device %s (idx %d)\n",
 		    sock, dev->name, dev->ifindex);
