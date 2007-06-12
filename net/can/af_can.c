@@ -453,34 +453,12 @@ int can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 }
 EXPORT_SYMBOL(can_rx_register);
 
-static void can_rx_delete_list(struct hlist_head *rl)
-{
-	struct receiver *r;
-	struct hlist_node *n;
-
-	hlist_for_each_entry_rcu(r, n, rl, list) {
-		hlist_del_rcu(&r->list);
-		kmem_cache_free(rcv_cache, r);
-	}
-}
-
 /*
  * can_rx_delete_device - rcu callback for dev_rcv_lists structure removal
  */
 static void can_rx_delete_device(struct rcu_head *rp)
 {
 	struct dev_rcv_lists *d = container_of(rp, struct dev_rcv_lists, rcu);
-	int i;
-
-	/* remove all receivers hooked at this netdevice */
-	can_rx_delete_list(&d->rx[RX_ERR]);
-	can_rx_delete_list(&d->rx[RX_ALL]);
-	can_rx_delete_list(&d->rx[RX_FIL]);
-	can_rx_delete_list(&d->rx[RX_INV]);
-	can_rx_delete_list(&d->rx[RX_EFF]);
-
-	for (i = 0; i < 2048; i++)
-		can_rx_delete_list(&d->rx_sff[i]);
 
 	kfree(d);
 }
@@ -573,6 +551,13 @@ int can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 	/* schedule the receiver item for deletion */
 	if (r)
 		call_rcu(&r->rcu, can_rx_delete_receiver);
+
+	/* remove device structure at NETDEV_UNREGISTER */
+	if (d && d->remove_on_zero_entries && !d->entries) {
+		hlist_del_rcu(&d->list);
+		call_rcu(&d->rcu, can_rx_delete_device);
+		dev_put(dev);
+	}
 
 	return ret;
 }
@@ -960,6 +945,7 @@ static int can_notifier(struct notifier_block *nb,
 			return NOTIFY_DONE;
 		}
 		d->dev = dev;
+		dev_hold(dev);
 
 		spin_lock_bh(&rcv_lists_lock);
 		hlist_add_head_rcu(&d->list, &rx_dev_list);
@@ -971,16 +957,21 @@ static int can_notifier(struct notifier_block *nb,
 		spin_lock_bh(&rcv_lists_lock);
 
 		d = find_dev_rcv_lists(dev);
-		if (d)
-			hlist_del_rcu(&d->list);
-		else
+		if (d) {
+			if (!d->entries)
+				hlist_del_rcu(&d->list);
+			else
+				d->remove_on_zero_entries = 1;
+		} else
 			printk(KERN_ERR "can: notifier: receive list not "
 			       "found for dev %s\n", dev->name);
 
 		spin_unlock_bh(&rcv_lists_lock);
 
-		if (d)
+		if (d && !d->entries) {
 			call_rcu(&d->rcu, can_rx_delete_device);
+			dev_put(dev);
+		}
 
 		break;
 	}
