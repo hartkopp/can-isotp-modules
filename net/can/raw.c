@@ -93,7 +93,7 @@ MODULE_PARM_DESC(debug, "debug print mask: 1:debug, 2:frames, 4:skbs");
 struct raw_opt {
 	int bound;
 	struct net_device *dev;
-	struct can_notif notifier;
+	struct notifier_block notifier;
 	int loopback;
 	int recv_own_msgs;
 	int count;                 /* number of active filters */
@@ -197,16 +197,23 @@ static void raw_disable_errfilter(struct net_device *dev, struct sock *sk)
 			  raw_rcv, sk);
 }
 
-static void raw_notifier(unsigned long msg, struct sock *sk,
-			 struct net_device *dev)
+static int raw_notifier(struct notifier_block *nb,
+			unsigned long msg, void *data)
 {
-	struct raw_opt *ro = raw_sk(sk);
+	struct net_device *dev = (struct net_device *)data;
+	struct raw_opt *ro = container_of(nb, struct raw_opt, notifier);
 
-	DBG("msg %ld sk %p dev %p ro->dev %p\n",
-	    __func__, msg, sk, dev, ro->dev);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
+	struct raw_sock *rs = container_of(ro, struct raw_sock, opt);
+	struct sock *sk = &rs->sk;
+#else
+#error Support me ;-)
+#endif
+
+	DBG("msg %ld sk %p dev %p ro->dev %p\n", msg, sk, dev, ro->dev);
 
 	if (ro->dev != dev)
-		return;
+		return NOTIFY_DONE;
 
 	switch (msg) {
 
@@ -239,6 +246,8 @@ static void raw_notifier(unsigned long msg, struct sock *sk,
 			sk->sk_error_report(sk);
 		break;
 	}
+
+	return NOTIFY_DONE;
 }
 
 static int raw_init(struct sock *sk)
@@ -259,10 +268,9 @@ static int raw_init(struct sock *sk)
 	ro->recv_own_msgs    = 0;
 
 	/* set notifier */
-	ro->notifier.func    = raw_notifier;
-	ro->notifier.sk      = sk;
+	ro->notifier.notifier_call = raw_notifier;
 
-	can_register_notifier(&ro->notifier);
+	register_netdevice_notifier(&ro->notifier);
 
 	return 0;
 }
@@ -293,7 +301,7 @@ static int raw_release(struct socket *sock)
 
 	release_sock(sk);
 
-	can_unregister_notifier(&ro->notifier);
+	unregister_netdevice_notifier(&ro->notifier);
 	sock_put(sk);
 
 	return 0;

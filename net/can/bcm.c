@@ -1473,7 +1473,7 @@ static void bcm_notifier(unsigned long msg, struct sock *sk,
 
 	DBG("msg %ld sk %p dev %p"
 	    " dev->ifindex %d bo->ifindex %d\n",
-	    __func__, msg, sk, dev, dev->ifindex, bo->ifindex);
+	    msg, sk, dev, dev->ifindex, bo->ifindex);
 
 	switch (msg) {
 
