@@ -54,6 +54,19 @@ struct can_proto {
 #endif
 };
 
+/**
+ * struct can_notif - CAN protocol notifier structure
+ * @list: list head/node struct
+ * @func: callback function for socket notification
+ * @sk:   pointer to notified sock
+ */
+struct can_notif {
+	struct list_head list;
+	void (*func)(unsigned long msg, struct sock *sk,
+		     struct net_device *dev);
+	struct sock *sk;
+};
+
 /* function prototypes for the CAN networklayer core (af_can.c) */
 
 extern int can_proto_register(struct can_proto *cp);
@@ -69,13 +82,8 @@ extern int can_rx_unregister(struct net_device *dev, canid_t can_id,
 			     void (*func)(struct sk_buff *, void *),
 			     void *data);
 
-extern int can_dev_register(struct net_device *dev,
-			    void (*func)(unsigned long msg, void *),
-			    void *data);
-
-extern int can_dev_unregister(struct net_device *dev,
-			      void (*func)(unsigned long msg, void *),
-			      void *data);
+extern void can_register_notifier(struct can_notif *notifier);
+extern int  can_unregister_notifier(struct can_notif *notifier);
 
 extern int can_send(struct sk_buff *skb, int loop);
 
