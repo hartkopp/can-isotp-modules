@@ -115,6 +115,7 @@ struct bcm_op {
 struct bcm_opt {
 	int bound;
 	int ifindex;
+	struct can_notif notifier;
 	struct list_head rx_ops;
 	struct list_head tx_ops;
 	unsigned long dropped_usr_msgs;
@@ -1462,6 +1463,34 @@ static int bcm_sendmsg(struct kiocb *iocb, struct socket *sock,
 }
 
 /*
+ * notification handler for netdevice status changes
+ */
+static void bcm_notifier(unsigned long msg, struct sock *sk,
+			 struct net_device *dev)
+{
+	struct bcm_opt *bo = bcm_sk(sk);
+
+	DBG("msg %ld sk %p dev %p"
+	    " dev->ifindex %d bo->ifindex %d\n",
+	    __func__, msg, sk, dev, dev->ifindex, bo->ifindex);
+
+	if (bo->ifindex != dev->ifindex)
+		return;
+
+	switch (msg) {
+
+	case NETDEV_UNREGISTER:
+		bo->bound   = 0;
+		bo->ifindex = 0;
+		/* fallthrough */
+	case NETDEV_DOWN:
+		sk->sk_err = ENETDOWN;
+		if (!sock_flag(sk, SOCK_DEAD))
+			sk->sk_error_report(sk);
+	}
+}
+
+/*
  * initial settings for all BCM sockets to be set at socket creation time
  */
 static int bcm_init(struct sock *sk)
@@ -1476,30 +1505,11 @@ static int bcm_init(struct sock *sk)
 	INIT_LIST_HEAD(&bo->tx_ops);
 	INIT_LIST_HEAD(&bo->rx_ops);
 
+	/* set notifier */
+	bo->notifier.func    = bcm_notifier;
+	bo->notifier.sk      = sk;
+
 	return 0;
-}
-
-/*
- * notification handler for netdevice status changes
- */
-static void bcm_notifier(unsigned long msg, void *data)
-{
-	struct sock *sk = (struct sock *)data;
-	struct bcm_opt *bo = bcm_sk(sk);
-
-	DBG("called for sock %p\n", sk);
-
-	switch (msg) {
-
-	case NETDEV_UNREGISTER:
-		bo->bound   = 0;
-		bo->ifindex = 0;
-		/* fallthrough */
-	case NETDEV_DOWN:
-		sk->sk_err = ENETDOWN;
-		if (!sock_flag(sk, SOCK_DEAD))
-			sk->sk_error_report(sk);
-	}
 }
 
 /*
@@ -1554,7 +1564,7 @@ static int bcm_release(struct socket *sock)
 		struct net_device *dev = dev_get_by_index(bo->ifindex);
 
 		if (dev) {
-			can_dev_unregister(dev, bcm_notifier, sk);
+			can_unregister_notifier(&bo->notifier);
 			dev_put(dev);
 		}
 	}
@@ -1584,7 +1594,7 @@ static int bcm_connect(struct socket *sock, struct sockaddr *uaddr, int len,
 			return -ENODEV;
 		}
 		bo->ifindex = dev->ifindex;
-		can_dev_register(dev, bcm_notifier, sk); /* register notif. */
+		can_register_notifier(&bo->notifier);
 		dev_put(dev);
 
 		DBG("socket %p bound to device %s (idx %d)\n",

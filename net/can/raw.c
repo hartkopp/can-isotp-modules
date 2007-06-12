@@ -93,6 +93,7 @@ MODULE_PARM_DESC(debug, "debug print mask: 1:debug, 2:frames, 4:skbs");
 struct raw_opt {
 	int bound;
 	int ifindex;
+	struct can_notif notifier;
 	int loopback;
 	int recv_own_msgs;
 	int count;                 /* number of active filters */
@@ -119,20 +120,23 @@ static inline struct raw_opt *raw_sk(const struct sock *sk)
 }
 #endif
 
-static void raw_notifier(unsigned long msg, void *data)
+static void raw_notifier(unsigned long msg, struct sock *sk,
+			 struct net_device *dev)
 {
-	struct sock *sk = (struct sock *)data;
 	struct raw_opt *ro = raw_sk(sk);
 
-	DBG("called for sock %p\n", sk);
+	DBG("msg %ld sk %p dev %p"
+	    " dev->ifindex %d ro->ifindex %d\n",
+	    __func__, msg, sk, dev, dev->ifindex, ro->ifindex);
+
+	if (ro->ifindex != dev->ifindex)
+		return;
 
 	switch (msg) {
 
 	case NETDEV_UNREGISTER:
-		spin_lock(&ro->lock);
 		ro->ifindex = 0;
 		ro->bound   = 0;
-		spin_unlock(&ro->lock);
 		/* fallthrough */
 	case NETDEV_DOWN:
 		sk->sk_err = ENETDOWN;
@@ -220,6 +224,10 @@ static int raw_init(struct sock *sk)
 	ro->loopback         = 1;
 	ro->recv_own_msgs    = 0;
 
+	/* set notifier */
+	ro->notifier.func    = raw_notifier;
+	ro->notifier.sk      = sk;
+
 	spin_lock_init(&ro->lock);
 
 	return 0;
@@ -252,7 +260,7 @@ static int raw_release(struct socket *sock)
 				  raw_rcv, sk);
 
 	if (dev) {
-		can_dev_unregister(dev, raw_notifier, sk);
+		can_unregister_notifier(&ro->notifier);
 		dev_put(dev);
 	}
 
@@ -293,7 +301,7 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 					sk->sk_error_report(sk);
 				goto out;
 			}
-			can_dev_unregister(dev, raw_notifier, sk);
+			can_unregister_notifier(&ro->notifier);
 		} else
 			dev = NULL;
 
@@ -319,7 +327,7 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 				sk->sk_error_report(sk);
 			goto out;
 		}
-		can_dev_register(dev, raw_notifier, sk);
+		can_register_notifier(&ro->notifier);
 	} else
 		dev = NULL;
 
