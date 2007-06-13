@@ -115,7 +115,7 @@ struct bcm_op {
 struct bcm_opt {
 	int bound;
 	int ifindex;
-	struct can_notif notifier;
+	struct notifier_block notifier;
 	struct list_head rx_ops;
 	struct list_head tx_ops;
 	unsigned long dropped_usr_msgs;
@@ -1465,14 +1465,21 @@ static int bcm_sendmsg(struct kiocb *iocb, struct socket *sock,
 /*
  * notification handler for netdevice status changes
  */
-static void bcm_notifier(unsigned long msg, struct sock *sk,
-			 struct net_device *dev)
+static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
+			void *data)
 {
-	struct bcm_opt *bo = bcm_sk(sk);
+	struct net_device *dev = (struct net_device *)data;
+	struct bcm_opt *bo = container_of(nb, struct bcm_opt, notifier);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
+	struct bcm_sock *bs = container_of(bo, struct bcm_sock, opt);
+	struct sock *sk = &bs->sk;
+#else
+#error Support me!
+#endif
 	struct bcm_op *op, *next;
 
-	DBG("msg %ld sk %p dev %p"
-	    " dev->ifindex %d bo->ifindex %d\n",
+	DBG("msg %ld sk %p dev %p dev->ifindex %d bo->ifindex %d\n",
 	    msg, sk, dev, dev->ifindex, bo->ifindex);
 
 	switch (msg) {
@@ -1508,6 +1515,8 @@ static void bcm_notifier(unsigned long msg, struct sock *sk,
 				sk->sk_error_report(sk);
 		}
 	}
+
+	return NOTIFY_DONE;
 }
 
 /*
@@ -1526,10 +1535,9 @@ static int bcm_init(struct sock *sk)
 	INIT_LIST_HEAD(&bo->rx_ops);
 
 	/* set notifier */
-	bo->notifier.func    = bcm_notifier;
-	bo->notifier.sk      = sk;
+	bo->notifier.notifier_call = bcm_notifier;
 
-	can_register_notifier(&bo->notifier);
+	register_netdevice_notifier(&bo->notifier);
 
 	return 0;
 }
@@ -1597,7 +1605,7 @@ static int bcm_release(struct socket *sock)
 
 	release_sock(sk);
 
-	can_unregister_notifier(&bo->notifier);
+	unregister_netdevice_notifier(&bo->notifier);
 	sock_put(sk);
 
 	return 0;
