@@ -89,9 +89,6 @@ module_param(debug, int, S_IRUGO);
 MODULE_PARM_DESC(debug, "debug print mask: 1:debug, 2:frames, 4:skbs");
 #endif
 
-static LIST_HEAD(notifier_list);
-static DEFINE_RWLOCK(notifier_lock);
-
 HLIST_HEAD(rx_dev_list);
 static struct dev_rcv_lists rx_alldev_list;
 static DEFINE_SPINLOCK(rcv_lists_lock);
@@ -864,57 +861,10 @@ int can_proto_unregister(struct can_proto *cp)
 }
 EXPORT_SYMBOL(can_proto_unregister);
 
-/**
- * can_register_notifier - subscribe notifier for CAN device status changes
- * @notifier: pointer to CAN netdevice notifier struct
- *
- * Description:
- *  Invokes the callback function on a status change of network devices.
- *
- */
-void can_register_notifier(struct can_notif *notifier)
-{
-	write_lock(&notifier_lock);
-	list_add(&notifier->list, &notifier_list);
-	write_unlock(&notifier_lock);
-}
-EXPORT_SYMBOL(can_register_notifier);
-
-/**
- * can_unregister_notifier - unsubscribe notifier for CAN device status changes
- * @notifier: pointer to CAN netdevice notifier struct
- *
- * Description:
- *  Removes subscription entry depending on given (subscription) values.
- *
- * Return:
- *  0 on success
- *  -EINVAL on missing subscription entry
- */
-int can_unregister_notifier(struct can_notif *notifier)
-{
-	struct can_notif *n, *next;
-	int ret = -EINVAL;
-
-	write_lock(&notifier_lock);
-	list_for_each_entry_safe(n, next, &notifier_list, list) {
-		if (n->func == notifier->func && n->sk == notifier->sk) {
-			list_del(&n->list);
-			ret = 0;
-			break;
-		}
-	}
-	write_unlock(&notifier_lock);
-
-	return ret;
-}
-EXPORT_SYMBOL(can_unregister_notifier);
-
 static int can_notifier(struct notifier_block *nb,
 			unsigned long msg, void *data)
 {
 	struct net_device *dev = (struct net_device *)data;
-	struct can_notif *n;
 	struct dev_rcv_lists *d;
 
 	DBG("called for %s, msg = %lu\n", dev->name, msg);
@@ -975,11 +925,6 @@ static int can_notifier(struct notifier_block *nb,
 
 		break;
 	}
-
-	read_lock(&notifier_lock);
-	list_for_each_entry(n, &notifier_list, list)
-		n->func(msg, n->sk, dev);
-	read_unlock(&notifier_lock);
 
 	return NOTIFY_DONE;
 }
