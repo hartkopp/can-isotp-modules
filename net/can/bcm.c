@@ -1470,17 +1470,16 @@ static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
 {
 	struct net_device *dev = (struct net_device *)data;
 	struct bcm_opt *bo = container_of(nb, struct bcm_opt, notifier);
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
 	struct bcm_sock *bs = container_of(bo, struct bcm_sock, opt);
 	struct sock *sk = &bs->sk;
 #else
-#error Support me!
+#error TODO (if needed): Notifier support for Kernel Versions < 2.6.12
 #endif
 	struct bcm_op *op, *next;
 
-	DBG("msg %ld sk %p dev %p dev->ifindex %d bo->ifindex %d\n",
-	    msg, sk, dev, dev->ifindex, bo->ifindex);
+	DBG("msg %ld sk %p dev->name %s dev->ifindex %d bo->ifindex %d\n",
+	    msg, sk, dev->name, dev->ifindex, bo->ifindex);
 
 	switch (msg) {
 
@@ -1503,6 +1502,7 @@ static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
 		}
 
 		release_sock(sk);
+
 		sk->sk_err = ENODEV;
 		if (!sock_flag(sk, SOCK_DEAD))
 			sk->sk_error_report(sk);
@@ -1555,6 +1555,8 @@ static int bcm_release(struct socket *sock)
 
 	/* remove bcm_ops, timer, rx_unregister(), etc. */
 
+	unregister_netdevice_notifier(&bo->notifier);
+
 	lock_sock(sk);
 
 	list_for_each_entry_safe(op, next, &bo->tx_ops, list) {
@@ -1604,8 +1606,6 @@ static int bcm_release(struct socket *sock)
 	}
 
 	release_sock(sk);
-
-	unregister_netdevice_notifier(&bo->notifier);
 	sock_put(sk);
 
 	return 0;
@@ -1631,13 +1631,13 @@ static int bcm_connect(struct socket *sock, struct sockaddr *uaddr, int len,
 			return -ENODEV;
 		}
 		bo->ifindex = dev->ifindex;
-		/* hold reference to 'dev' until bcm_release() */
+		/* hold interface reference to 'dev' until bcm_release() */
 
 		DBG("socket %p bound to device %s (idx %d)\n",
 		    sock, dev->name, dev->ifindex);
 
 	} else {
-		/* no notifier for ifindex = 0 ('any' CAN device) */
+		/* no interface reference for ifindex = 0 ('any' CAN device) */
 		bo->ifindex = 0;
 	}
 

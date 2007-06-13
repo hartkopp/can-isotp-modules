@@ -204,15 +204,15 @@ static int raw_notifier(struct notifier_block *nb,
 {
 	struct net_device *dev = (struct net_device *)data;
 	struct raw_opt *ro = container_of(nb, struct raw_opt, notifier);
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
 	struct raw_sock *rs = container_of(ro, struct raw_sock, opt);
 	struct sock *sk = &rs->sk;
 #else
-#error Support me!
+#error TODO (if needed): Notifier support for Kernel Versions < 2.6.12
 #endif
 
-	DBG("msg %ld sk %p dev %p ro->dev %p\n", msg, sk, dev, ro->dev);
+	DBG("msg %ld sk %p dev %p dev->name %s ro->dev %p\n",
+	    msg, sk, dev, dev->name, ro->dev);
 
 	if (ro->dev != dev)
 		return NOTIFY_DONE;
@@ -285,6 +285,7 @@ static int raw_release(struct socket *sock)
 	DBG("socket %p, sk %p, refcnt %d\n", sock, sk,
 	    atomic_read(&sk->sk_refcnt));
 
+	unregister_netdevice_notifier(&ro->notifier);
 
 	lock_sock(sk);
 
@@ -304,8 +305,6 @@ static int raw_release(struct socket *sock)
 	ro->count = 0;
 
 	release_sock(sk);
-
-	unregister_netdevice_notifier(&ro->notifier);
 	sock_put(sk);
 
 	return 0;
