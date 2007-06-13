@@ -549,6 +549,8 @@ int can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 
 	/* remove device structure at NETDEV_UNREGISTER */
 	if (d && d->remove_on_zero_entries && !d->entries) {
+		DBG("removing dev_rcv_list for %s on zero entries.\n",
+		    dev->name);
 		hlist_del_rcu(&d->list);
 		call_rcu(&d->rcu, can_rx_delete_device);
 		dev_put(dev);
@@ -861,13 +863,14 @@ int can_proto_unregister(struct can_proto *cp)
 }
 EXPORT_SYMBOL(can_proto_unregister);
 
-static int can_notifier(struct notifier_block *nb,
-			unsigned long msg, void *data)
+static int can_notifier(struct notifier_block *nb, unsigned long msg,
+			void *data)
 {
 	struct net_device *dev = (struct net_device *)data;
 	struct dev_rcv_lists *d;
 
-	DBG("called for %s, msg = %lu\n", dev->name, msg);
+	DBG("msg %lu dev->name %s dev->ifindex %d\n",
+	    msg, dev->name, dev->ifindex);
 
 	if (dev->type != ARPHRD_CAN)
 		return NOTIFY_DONE;
@@ -904,12 +907,13 @@ static int can_notifier(struct notifier_block *nb,
 		break;
 
 	case NETDEV_UNREGISTER:
-		DBG("removing dev_rcv_list for %s\n", dev->name);
-
 		spin_lock_bh(&rcv_lists_lock);
 
 		d = find_dev_rcv_lists(dev);
 		if (d) {
+			DBG("remove dev_rcv_list for %s ( %d entries )\n",
+			    dev->name, d->entries);
+
 			if (!d->entries)
 				hlist_del_rcu(&d->list);
 			else
