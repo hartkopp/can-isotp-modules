@@ -170,8 +170,9 @@ static void raw_enable_errfilter(struct net_device *dev, struct sock *sk)
 {
 	struct raw_opt *ro = raw_sk(sk);
 
-	can_rx_register(dev, 0, ro->err_mask | CAN_ERR_FLAG,
-			raw_rcv, sk, IDENT);
+	if (ro->err_mask)
+		can_rx_register(dev, 0, ro->err_mask | CAN_ERR_FLAG,
+				raw_rcv, sk, IDENT);
 }
 
 static void raw_disable_filters(struct net_device *dev, struct sock *sk)
@@ -193,8 +194,9 @@ static void raw_disable_errfilter(struct net_device *dev, struct sock *sk)
 {
 	struct raw_opt *ro = raw_sk(sk);
 
-	can_rx_unregister(dev, 0, ro->err_mask | CAN_ERR_FLAG,
-			  raw_rcv, sk);
+	if (ro->err_mask)
+		can_rx_unregister(dev, 0, ro->err_mask | CAN_ERR_FLAG,
+				  raw_rcv, sk);
 }
 
 static int raw_notifier(struct notifier_block *nb,
@@ -207,7 +209,7 @@ static int raw_notifier(struct notifier_block *nb,
 	struct raw_sock *rs = container_of(ro, struct raw_sock, opt);
 	struct sock *sk = &rs->sk;
 #else
-#error Support me ;-)
+#error Support me!
 #endif
 
 	DBG("msg %ld sk %p dev %p ro->dev %p\n", msg, sk, dev, ro->dev);
@@ -223,16 +225,15 @@ static int raw_notifier(struct notifier_block *nb,
 		if (ro->bound) {
 			raw_disable_filters(dev, sk);
 			raw_disable_errfilter(dev, sk);
+			dev_put(dev);
 		}
 
 		if (ro->count > 1)
 			kfree(ro->filter);
 
-		if (dev)
-			dev_put(dev);
-
-		ro->dev     = NULL;
-		ro->bound   = 0;
+		ro->dev   = NULL;
+		ro->bound = 0;
+		ro->count = 0;
 		release_sock(sk);
 
 		sk->sk_err = ENODEV;
@@ -291,13 +292,16 @@ static int raw_release(struct socket *sock)
 	if (ro->bound) {
 		raw_disable_filters(dev, sk);
 		raw_disable_errfilter(dev, sk);
+		if (dev)
+			dev_put(dev);
 	}
 
 	if (ro->count > 1)
 		kfree(ro->filter);
 
-	if (dev)
-		dev_put(dev);
+	ro->dev   = NULL;
+	ro->bound = 0;
+	ro->count = 0;
 
 	release_sock(sk);
 
