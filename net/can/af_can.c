@@ -254,6 +254,9 @@ int can_send(struct sk_buff *skb, int loop)
 		return -EPERM;
 	}
 
+	if (!(skb->dev->flags & IFF_UP))
+		return -ENETDOWN;
+
 	skb->protocol = htons(ETH_P_CAN);
 
 	if (loop) {
@@ -286,9 +289,6 @@ int can_send(struct sk_buff *skb, int loop)
 		/* indication for the CAN driver: no loopback required */
 		skb->pkt_type = PACKET_HOST;
 	}
-
-	if (!(skb->dev->flags & IFF_UP))
-		return -ENETDOWN;
 
 	/* send to netdevice */
 	err = dev_queue_xmit(skb);
