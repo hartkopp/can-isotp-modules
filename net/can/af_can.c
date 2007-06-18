@@ -419,8 +419,8 @@ int can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 
 	/* insert new receiver  (dev,canid,mask) -> (func,data) */
 
-	DBG("dev %p, id %03X, mask %03X, callback %p, data %p, ident %s\n",
-	    dev, can_id, mask, func, data, ident);
+	DBG("dev %p (%s), id %03X, mask %03X, callback %p, data %p, "
+	    "ident %s\n", dev, DNAME(dev), can_id, mask, func, data, ident);
 
 	r = kmem_cache_alloc(rcv_cache, GFP_KERNEL);
 	if (!r)
@@ -505,8 +505,8 @@ int can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 	struct dev_rcv_lists *d;
 	int ret = 0;
 
-	DBG("dev %p, id %03X, mask %03X, callback %p, data %p\n",
-	    dev, can_id, mask, func, data);
+	DBG("dev %p (%s), id %03X, mask %03X, callback %p, data %p\n",
+	    dev, DNAME(dev), can_id, mask, func, data);
 
 	spin_lock_bh(&rcv_lists_lock);
 
@@ -882,11 +882,11 @@ static int can_notifier(struct notifier_block *nb, unsigned long msg,
 	struct net_device *dev = (struct net_device *)data;
 	struct dev_rcv_lists *d;
 
-	DBG("msg %lu dev->name %s dev->ifindex %d\n",
-	    msg, dev->name, dev->ifindex);
-
 	if (dev->type != ARPHRD_CAN)
 		return NOTIFY_DONE;
+
+	DBG("msg %ld for dev %p (%s idx %d)\n",
+	    msg, dev, dev->name, dev->ifindex);
 
 	switch (msg) {
 
