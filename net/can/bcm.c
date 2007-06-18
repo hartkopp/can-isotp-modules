@@ -1489,6 +1489,7 @@ static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
 #error TODO (if needed): Notifier support for Kernel Versions < 2.6.12
 #endif
 	struct bcm_op *op, *next;
+	int notify_enodev = 0;
 
 	DBG("msg %ld sk %p dev->name %s dev->ifindex %d bo->ifindex %d\n",
 	    msg, sk, dev->name, dev->ifindex, bo->ifindex);
@@ -1507,21 +1508,22 @@ static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
 
 		/* remove device reference, if this is our bound device */
 		if (bo->bound && bo->ifindex == dev->ifindex) {
-			dev_put(dev);
-
 			bo->bound   = 0;
 			bo->ifindex = 0;
+			notify_enodev = 1;
 		}
 
 		release_sock(sk);
 
-		sk->sk_err = ENODEV;
-		if (!sock_flag(sk, SOCK_DEAD))
-			sk->sk_error_report(sk);
+		if (notify_enodev) {
+			sk->sk_err = ENODEV;
+			if (!sock_flag(sk, SOCK_DEAD))
+				sk->sk_error_report(sk);
+		}
 		break;
 
 	case NETDEV_DOWN:
-		if (bo->ifindex == dev->ifindex) {
+		if (bo->bound && bo->ifindex == dev->ifindex) {
 			sk->sk_err = ENETDOWN;
 			if (!sock_flag(sk, SOCK_DEAD))
 				sk->sk_error_report(sk);
@@ -1606,13 +1608,7 @@ static int bcm_release(struct socket *sock)
 		remove_proc_entry(bo->procname, proc_dir);
 
 	/* remove device reference */
-	if (bo->bound && bo->ifindex) {
-		struct net_device *dev = dev_get_by_index(bo->ifindex);
-
-		if (dev) {
-			dev_put(dev);
-			dev_put(dev);
-		}
+	if (bo->bound) {
 		bo->bound   = 0;
 		bo->ifindex = 0;
 	}
@@ -1644,13 +1640,13 @@ static int bcm_connect(struct socket *sock, struct sockaddr *uaddr, int len,
 		}
 
 		if (dev->type != ARPHRD_CAN) {
-		  DBG("device %d no CAN device\n", addr->can_ifindex);
-		  dev_put(dev);
-		  return -ENODEV;
+			DBG("device %d no CAN device\n", addr->can_ifindex);
+			dev_put(dev);
+			return -ENODEV;
 		}
 
 		bo->ifindex = dev->ifindex;
-		/* hold interface reference to 'dev' until bcm_release() */
+		dev_put(dev);
 
 		DBG("socket %p bound to device %s (idx %d)\n",
 		    sock, dev->name, dev->ifindex);
