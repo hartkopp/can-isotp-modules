@@ -255,8 +255,10 @@ int can_send(struct sk_buff *skb, int loop)
 		return -EPERM;
 	}
 
-	if (!(skb->dev->flags & IFF_UP))
+	if (!(skb->dev->flags & IFF_UP)) {
+		kfree_skb(skb);
 		return -ENETDOWN;
+	}
 
 	skb->protocol = htons(ETH_P_CAN);
 
@@ -280,8 +282,10 @@ int can_send(struct sk_buff *skb, int loop)
 		if (!(skb->dev->flags & IFF_LOOPBACK)) {
 			struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
 
-			if (!newskb)
+			if (!newskb) {
+				kfree_skb(skb);
 				return -ENOMEM;
+			}
 
 			/* perform the local loopback here */
 			newskb->sk = skb->sk;
