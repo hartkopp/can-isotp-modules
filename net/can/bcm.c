@@ -1642,6 +1642,13 @@ static int bcm_connect(struct socket *sock, struct sockaddr *uaddr, int len,
 			    addr->can_ifindex);
 			return -ENODEV;
 		}
+
+		if (dev->type != ARPHRD_CAN) {
+		  DBG("device %d no CAN device\n", addr->can_ifindex);
+		  dev_put(dev);
+		  return -ENODEV;
+		}
+
 		bo->ifindex = dev->ifindex;
 		/* hold interface reference to 'dev' until bcm_release() */
 

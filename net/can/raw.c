@@ -343,6 +343,12 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 			err = -ENODEV;
 			goto out;
 		}
+		if (dev->type != ARPHRD_CAN) {
+			DBG("device %d no CAN device\n", addr->can_ifindex);
+			dev_put(dev);
+			err = -ENODEV;
+			goto out;
+		}
 		if (!(dev->flags & IFF_UP)) {
 			sk->sk_err = ENETDOWN;
 			if (!sock_flag(sk, SOCK_DEAD))
