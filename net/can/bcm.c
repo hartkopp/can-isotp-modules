@@ -110,6 +110,7 @@ struct bcm_op {
 	struct can_frame sframe;
 	struct can_frame last_sframe;
 	struct sock *sk;
+	struct net_device *rx_reg_dev;
 };
 
 struct bcm_opt {
@@ -1309,6 +1310,7 @@ static int bcm_rx_setup(struct bcm_msg_head *msg_head, struct msghdr *msg,
 				can_rx_register(dev, op->can_id,
 						REGMASK(op->can_id),
 						bcm_rx_handler, op, IDENT);
+				op->rx_reg_dev = dev;
 				dev_put(dev);
 			}
 
@@ -1488,7 +1490,7 @@ static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
 #else
 #error TODO (if needed): Notifier support for Kernel Versions < 2.6.12
 #endif
-	struct bcm_op *op, *next;
+	struct bcm_op *op;
 	int notify_enodev = 0;
 
 	DBG("msg %ld sk %p dev->name %s dev->ifindex %d bo->ifindex %d\n",
@@ -1500,11 +1502,15 @@ static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
 		lock_sock(sk);
 
 		/* remove device specific receive entries */
-		list_for_each_entry_safe(op, next, &bo->rx_ops, list)
-			if (op->ifindex == dev->ifindex)
+		list_for_each_entry(op, &bo->rx_ops, list)
+			if (op->rx_reg_dev == dev) {
 				can_rx_unregister(dev, op->can_id,
 						  REGMASK(op->can_id),
 						  bcm_rx_handler, op);
+
+				/* mark as removed subscription */
+				op->rx_reg_dev = NULL;
+			}
 
 		/* remove device reference, if this is our bound device */
 		if (bo->bound && bo->ifindex == dev->ifindex) {
@@ -1586,15 +1592,23 @@ static int bcm_release(struct socket *sock)
 		 * can_rx_unregister() is always a save thing to do here.
 		 */
 		if (op->ifindex) {
-			struct net_device *dev = dev_get_by_index(op->ifindex);
 
-			if (dev) {
-				can_rx_unregister(dev, op->can_id,
-						  REGMASK(op->can_id),
-						  bcm_rx_handler, op);
-				dev_put(dev);
+			/*
+			 * Only remove subscriptions that had not been
+			 * removed due to NETDEV_UNREGISTER in bcm_notifier()
+			 */
+			if (op->rx_reg_dev) {
+				struct net_device *dev;
+
+				dev = dev_get_by_index(op->ifindex);
+				if (dev) {
+					BUG_ON(op->rx_reg_dev != dev);
+					can_rx_unregister(dev, op->can_id,
+							  REGMASK(op->can_id),
+							  bcm_rx_handler, op);
+					dev_put(dev);
+				}
 			}
-
 		} else
 			can_rx_unregister(NULL, op->can_id,
 					  REGMASK(op->can_id),
