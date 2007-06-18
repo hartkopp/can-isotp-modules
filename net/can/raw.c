@@ -373,6 +373,7 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 		/* filters set by default/setsockopt */
 		raw_enable_filters(dev, sk);
 		raw_enable_errfilter(dev, sk);
+		dev_put(dev);
 
 	} else {
 		ro->ifindex = 0;
