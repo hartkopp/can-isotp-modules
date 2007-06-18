@@ -158,11 +158,12 @@ static void raw_enable_filters(struct net_device *dev, struct sock *sk)
 	int i;
 
 	for (i = 0; i < ro->count; i++) {
-		can_rx_register(dev, filter[i].can_id, filter[i].can_mask,
-				raw_rcv, sk, IDENT);
 		DBG("filter can_id %08X, can_mask %08X%s, sk %p\n",
 		    filter[i].can_id, filter[i].can_mask,
 		    filter[i].can_id & CAN_INV_FILTER ? " (inv)" : "", sk);
+
+		can_rx_register(dev, filter[i].can_id, filter[i].can_mask,
+				raw_rcv, sk, IDENT);
 	}
 }
 
@@ -182,11 +183,12 @@ static void raw_disable_filters(struct net_device *dev, struct sock *sk)
 	int i;
 
 	for (i = 0; i < ro->count; i++) {
-		can_rx_unregister(dev, filter[i].can_id, filter[i].can_mask,
-				  raw_rcv, sk);
 		DBG("filter can_id %08X, can_mask %08X%s, sk %p\n",
 		    filter[i].can_id, filter[i].can_mask,
 		    filter[i].can_id & CAN_INV_FILTER ? " (inv)" : "", sk);
+
+		can_rx_unregister(dev, filter[i].can_id, filter[i].can_mask,
+				  raw_rcv, sk);
 	}
 }
 
