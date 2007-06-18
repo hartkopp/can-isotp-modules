@@ -92,7 +92,7 @@ MODULE_PARM_DESC(debug, "debug print mask: 1:debug, 2:frames, 4:skbs");
 
 struct raw_opt {
 	int bound;
-	struct net_device *dev;
+	int ifindex;
 	struct notifier_block notifier;
 	int loopback;
 	int recv_own_msgs;
@@ -213,10 +213,10 @@ static int raw_notifier(struct notifier_block *nb,
 #error TODO (if needed): Notifier support for Kernel Versions < 2.6.12
 #endif
 
-	DBG("msg %ld sk %p dev %p dev->name %s ro->dev %p\n",
-	    msg, sk, dev, dev->name, ro->dev);
+	DBG("msg %ld sk %p dev %p (name %s ifindex %d) ro->ifindex %d\n",
+	    msg, sk, dev, dev->name, dev->ifindex, ro->ifindex);
 
-	if (ro->dev != dev)
+	if (ro->ifindex != dev->ifindex)
 		return NOTIFY_DONE;
 
 	switch (msg) {
@@ -227,15 +227,14 @@ static int raw_notifier(struct notifier_block *nb,
 		if (ro->bound) {
 			raw_disable_filters(dev, sk);
 			raw_disable_errfilter(dev, sk);
-			dev_put(dev);
 		}
 
 		if (ro->count > 1)
 			kfree(ro->filter);
 
-		ro->dev   = NULL;
-		ro->bound = 0;
-		ro->count = 0;
+		ro->ifindex = 0;
+		ro->bound   = 0;
+		ro->count   = 0;
 		release_sock(sk);
 
 		sk->sk_err = ENODEV;
@@ -258,7 +257,7 @@ static int raw_init(struct sock *sk)
 	struct raw_opt *ro = raw_sk(sk);
 
 	ro->bound            = 0;
-	ro->dev              = NULL;
+	ro->ifindex          = 0;
 
 	/* set default filter to single entry dfilter */
 	ro->dfilter.can_id   = 0;
@@ -282,7 +281,6 @@ static int raw_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
 	struct raw_opt *ro = raw_sk(sk);
-	struct net_device *dev = ro->dev;
 
 	DBG("socket %p, sk %p, refcnt %d\n", sock, sk,
 	    atomic_read(&sk->sk_refcnt));
@@ -293,18 +291,25 @@ static int raw_release(struct socket *sock)
 
 	/* remove current filters & unregister */
 	if (ro->bound) {
-		raw_disable_filters(dev, sk);
-		raw_disable_errfilter(dev, sk);
-		if (dev)
-			dev_put(dev);
+		if (ro->ifindex) {
+			struct net_device *dev = dev_get_by_index(ro->ifindex);
+			if (dev) {
+				raw_disable_filters(dev, sk);
+				raw_disable_errfilter(dev, sk);
+				dev_put(dev);
+			}
+		} else {
+			raw_disable_filters(NULL, sk);
+			raw_disable_errfilter(NULL, sk);
+		}
 	}
 
 	if (ro->count > 1)
 		kfree(ro->filter);
 
-	ro->dev   = NULL;
-	ro->bound = 0;
-	ro->count = 0;
+	ro->ifindex = 0;
+	ro->bound   = 0;
+	ro->count   = 0;
 
 	release_sock(sk);
 	sock_put(sk);
@@ -317,7 +322,6 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 	struct sockaddr_can *addr = (struct sockaddr_can *)uaddr;
 	struct sock *sk = sock->sk;
 	struct raw_opt *ro = raw_sk(sk);
-	struct net_device *dev = ro->dev;
 	int err = 0;
 
 	DBG("socket %p to device %d\n", sock, addr->can_ifindex);
@@ -329,17 +333,25 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 
 	if (ro->bound) {
 		/* unregister current filters for this device */
-		raw_disable_filters(dev, sk);
-		raw_disable_errfilter(dev, sk);
+		if (ro->ifindex) {
+			struct net_device *dev = dev_get_by_index(ro->ifindex);
+			if (dev) {
+				raw_disable_filters(dev, sk);
+				raw_disable_errfilter(dev, sk);
+				dev_put(dev);
+			}
+			ro->ifindex = 0;
 
-		if (dev)
-			dev_put(dev);
+		} else {
+			raw_disable_filters(NULL, sk);
+			raw_disable_errfilter(NULL, sk);
+		}
 
 		ro->bound = 0;
 	}
 
 	if (addr->can_ifindex) {
-		dev = dev_get_by_index(addr->can_ifindex);
+		struct net_device *dev = dev_get_by_index(addr->can_ifindex);
 		if (!dev) {
 			DBG("could not find device %d\n", addr->can_ifindex);
 			err = -ENODEV;
@@ -356,14 +368,19 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 			if (!sock_flag(sk, SOCK_DEAD))
 				sk->sk_error_report(sk);
 		}
-	} else
-		dev = NULL;
+		ro->ifindex = dev->ifindex;
 
-	ro->dev = dev;
+		/* filters set by default/setsockopt */
+		raw_enable_filters(dev, sk);
+		raw_enable_errfilter(dev, sk);
 
-	/* filters set by default/setsockopt */
-	raw_enable_filters(dev, sk);
-	raw_enable_errfilter(dev, sk);
+	} else {
+		ro->ifindex = 0;
+
+		/* filters set by default/setsockopt */
+		raw_enable_filters(NULL, sk);
+		raw_enable_errfilter(NULL, sk);
+	}
 
 	ro->bound = 1;
 
@@ -384,11 +401,7 @@ static int raw_getname(struct socket *sock, struct sockaddr *uaddr,
 		return -EOPNOTSUPP;
 
 	addr->can_family  = AF_CAN;
-
-	if (ro->dev)
-		addr->can_ifindex = ro->dev->ifindex;
-	else
-		addr->can_ifindex = 0;
+	addr->can_ifindex = ro->ifindex;
 
 	*len = sizeof(*addr);
 
@@ -413,7 +426,7 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 	struct raw_opt *ro = raw_sk(sk);
 	struct can_filter *filter = NULL;  /* dyn. alloc'ed filters */
 	struct can_filter sfilter;         /* single filter */
-	struct net_device *dev = ro->dev;
+	struct net_device *dev = NULL;
 	can_err_mask_t err_mask = 0;
 	int count = 0;
 	int err;
@@ -450,6 +463,9 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 
 		lock_sock(sk);
 
+		if (ro->bound && ro->ifindex)
+			dev = dev_get_by_index(ro->ifindex);
+
 		/* remove current filters & unregister */
 		if (ro->bound)
 			raw_disable_filters(dev, sk);
@@ -469,6 +485,9 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 		if (ro->bound)
 			raw_enable_filters(dev, sk);
 
+		if (dev)
+			dev_put(dev);
+
 		release_sock(sk);
 
 		break;
@@ -485,6 +504,9 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 
 		lock_sock(sk);
 
+		if (ro->bound && ro->ifindex)
+			dev = dev_get_by_index(ro->ifindex);
+
 		/* remove current error mask */
 		if (ro->bound)
 			raw_disable_errfilter(dev, sk);
@@ -494,6 +516,9 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 		/* add new error mask */
 		if (ro->bound)
 			raw_enable_errfilter(dev, sk);
+
+		if (dev)
+			dev_put(dev);
 
 		release_sock(sk);
 
@@ -590,7 +615,7 @@ static int raw_sendmsg(struct kiocb *iocb, struct socket *sock,
 	struct raw_opt *ro = raw_sk(sk);
 	struct sk_buff *skb;
 	struct net_device *dev;
-	int ifindex = 0;
+	int ifindex;
 	int err;
 
 	DBG("socket %p, sk %p\n", sock, sk);
@@ -604,8 +629,7 @@ static int raw_sendmsg(struct kiocb *iocb, struct socket *sock,
 
 		ifindex = addr->can_ifindex;
 	} else
-		if (ro->dev)
-			ifindex = ro->dev->ifindex;
+		ifindex = ro->ifindex;
 
 	dev = dev_get_by_index(ifindex);
 	if (!dev) {
