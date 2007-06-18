@@ -1391,10 +1391,22 @@ static int bcm_sendmsg(struct kiocb *iocb, struct socket *sock,
 
 		ifindex = addr->can_ifindex; /* ifindex from sendto() */
 
-		if (ifindex && !dev_get_by_index(ifindex)) {
-			DBG("device %d not found\n", ifindex);
-			return -ENODEV;
-		}
+		if (ifindex) {
+			struct net_device *dev = dev_get_by_index(ifindex);
+
+			if (!dev) {
+				DBG("device %d not found\n", ifindex);
+				return -ENODEV;
+			}
+
+			if (dev->type != ARPHRD_CAN) {
+				DBG("device %d no CAN device\n", ifindex);
+				dev_put(dev);
+				return -ENODEV;
+			}
+
+			dev_put(dev);
+                }
 	}
 
 	/* read message head information */
