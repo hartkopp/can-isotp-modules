@@ -822,6 +822,19 @@ static void bcm_remove_op(struct bcm_op *op)
 	return;
 }
 
+static void bcm_rx_unreg(struct net_device *dev, struct bcm_op *op)
+{
+	if (op->rx_reg_dev == dev) {
+		can_rx_unregister(dev, op->can_id, REGMASK(op->can_id),
+				  bcm_rx_handler, op);
+
+		/* mark as removed subscription */
+		op->rx_reg_dev = NULL;
+	} else
+		printk(KERN_ERR "can-bcm: bcm_rx_unreg: registered device "
+		       "mismatch %p %p\n", op->rx_reg_dev, dev);
+}
+
 /*
  * bcm_delete_rx_op - find and remove a rx op (returns number of removed ops)
  */
@@ -840,16 +853,20 @@ static int bcm_delete_rx_op(struct list_head *ops, canid_t can_id, int ifindex)
 			 * thing to do here.
 			 */
 			if (op->ifindex) {
-				struct net_device *dev =
-					dev_get_by_index(op->ifindex);
+				/*
+				 * Only remove subscriptions that had not
+				 * been removed due to NETDEV_UNREGISTER
+				 * in bcm_notifier()
+				 */
+				if (op->rx_reg_dev) {
+					struct net_device *dev;
 
-				if (dev) {
-					can_rx_unregister(dev, op->can_id,
-							  REGMASK(op->can_id),
-							  bcm_rx_handler, op);
-					dev_put(dev);
+					dev = dev_get_by_index(op->ifindex);
+					if (dev) {
+						bcm_rx_unreg(dev, op);
+						dev_put(dev);
+					}
 				}
-
 			} else
 				can_rx_unregister(NULL, op->can_id,
 						  REGMASK(op->can_id),
@@ -1503,14 +1520,8 @@ static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
 
 		/* remove device specific receive entries */
 		list_for_each_entry(op, &bo->rx_ops, list)
-			if (op->rx_reg_dev == dev) {
-				can_rx_unregister(dev, op->can_id,
-						  REGMASK(op->can_id),
-						  bcm_rx_handler, op);
-
-				/* mark as removed subscription */
-				op->rx_reg_dev = NULL;
-			}
+			if (op->rx_reg_dev == dev)
+				bcm_rx_unreg(dev, op);
 
 		/* remove device reference, if this is our bound device */
 		if (bo->bound && bo->ifindex == dev->ifindex) {
@@ -1592,20 +1603,17 @@ static int bcm_release(struct socket *sock)
 		 * can_rx_unregister() is always a save thing to do here.
 		 */
 		if (op->ifindex) {
-
 			/*
-			 * Only remove subscriptions that had not been
-			 * removed due to NETDEV_UNREGISTER in bcm_notifier()
+			 * Only remove subscriptions that had not
+			 * been removed due to NETDEV_UNREGISTER
+			 * in bcm_notifier()
 			 */
 			if (op->rx_reg_dev) {
 				struct net_device *dev;
 
 				dev = dev_get_by_index(op->ifindex);
 				if (dev) {
-					BUG_ON(op->rx_reg_dev != dev);
-					can_rx_unregister(dev, op->can_id,
-							  REGMASK(op->can_id),
-							  bcm_rx_handler, op);
+					bcm_rx_unreg(dev, op);
 					dev_put(dev);
 				}
 			}
