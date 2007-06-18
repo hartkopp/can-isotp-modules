@@ -244,6 +244,7 @@ static int can_create(struct socket *sock, int protocol)
  *  0 on success
  *  -ENETDOWN when the selected interface is down
  *  -ENOBUFS on full driver queue (see net_xmit_errno())
+ *  -ENOMEM when skb_clone() failed when performing the local loopback fallback
  */
 int can_send(struct sk_buff *skb, int loop)
 {
@@ -278,6 +279,9 @@ int can_send(struct sk_buff *skb, int loop)
 		/* interface not capabable to do the loopback itself? */
 		if (!(skb->dev->flags & IFF_LOOPBACK)) {
 			struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
+
+			if (!newskb)
+				return -ENOMEM;
 
 			/* perform the local loopback here */
 			newskb->sk = skb->sk;
