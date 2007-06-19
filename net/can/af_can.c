@@ -558,7 +558,8 @@ int can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		DBG("removing dev_rcv_list for %s on zero entries.\n",
 		    dev->name);
 		hlist_del_rcu(&d->list);
-	}
+	} else
+		d = NULL;
 
  out:
 	spin_unlock_bh(&rcv_lists_lock);
@@ -568,7 +569,7 @@ int can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		call_rcu(&r->rcu, can_rx_delete_receiver);
 
 	/* schedule the device structure for deletion */
-	if (d && d->remove_on_zero_entries && !d->entries)
+	if (d)
 		call_rcu(&d->rcu, can_rx_delete_device);
 
 	return ret;
@@ -926,9 +927,10 @@ static int can_notifier(struct notifier_block *nb, unsigned long msg,
 			DBG("remove dev_rcv_list for %s ( %d entries )\n",
 			    dev->name, d->entries);
 
-			if (d->entries)
+			if (d->entries) {
 				d->remove_on_zero_entries = 1;
-			else 
+				d = NULL;
+			} else 
 				hlist_del_rcu(&d->list);
 		} else
 			printk(KERN_ERR "can: notifier: receive list not "
@@ -936,7 +938,7 @@ static int can_notifier(struct notifier_block *nb, unsigned long msg,
 
 		spin_unlock_bh(&rcv_lists_lock);
 
-		if (d && !d->entries)
+		if (d)
 			call_rcu(&d->rcu, can_rx_delete_device);
 
 		break;
