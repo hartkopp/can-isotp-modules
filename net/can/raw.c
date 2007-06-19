@@ -213,7 +213,7 @@ static int raw_notifier(struct notifier_block *nb,
 #error TODO (if needed): Notifier support for Kernel Versions < 2.6.12
 #endif
 
-	DBG("msg %ld for dev %p (%s idx %d) # sk %p ro->ifindex %d\n",
+	DBG("msg %ld for dev %p (%s idx %d) sk %p ro->ifindex %d\n",
 	    msg, dev, dev->name, dev->ifindex, sk, ro->ifindex);
 
 	if (dev->type != ARPHRD_CAN)

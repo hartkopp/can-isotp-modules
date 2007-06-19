@@ -924,7 +924,7 @@ static int can_notifier(struct notifier_block *nb, unsigned long msg,
 
 		d = find_dev_rcv_lists(dev);
 		if (d) {
-			DBG("remove dev_rcv_list for %s ( %d entries )\n",
+			DBG("remove dev_rcv_list for %s (%d entries)\n",
 			    dev->name, d->entries);
 
 			if (d->entries) {

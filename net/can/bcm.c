@@ -1510,7 +1510,7 @@ static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
 	struct bcm_op *op;
 	int notify_enodev = 0;
 
-	DBG("msg %ld for dev %p (%s idx %d) # sk %p bo->ifindex %d\n",
+	DBG("msg %ld for dev %p (%s idx %d) sk %p bo->ifindex %d\n",
 	    msg, dev, dev->name, dev->ifindex, sk, bo->ifindex);
 
 	if (dev->type != ARPHRD_CAN)
