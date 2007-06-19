@@ -778,6 +778,9 @@ int can_proto_unregister(struct can_proto *cp)
 }
 EXPORT_SYMBOL(can_proto_unregister);
 
+/*
+ * af_can notifier to create/remove CAN netdevice specific structs
+ */
 static int can_notifier(struct notifier_block *nb, unsigned long msg,
 			void *data)
 {
