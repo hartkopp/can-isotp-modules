@@ -708,105 +708,6 @@ static int can_rcv(struct sk_buff *skb, struct net_device *dev,
 }
 
 /*
- * af_can debugging stuff
- */
-
-#ifdef CONFIG_CAN_DEBUG_CORE
-
-#define DBG_BSIZE 1024
-
-/**
- * can_debug_cframe - print CAN frame
- * @msg: pointer to message printed before the given CAN frame
- * @cf: pointer to CAN frame
- */
-void can_debug_cframe(const char *msg, struct can_frame *cf, ...)
-{
-	va_list ap;
-	int len;
-	int dlc, i;
-	char *buf;
-
-	buf = kmalloc(DBG_BSIZE, GFP_ATOMIC);
-	if (!buf)
-		return;
-
-	len = sprintf(buf, KERN_DEBUG);
-	va_start(ap, cf);
-	len += snprintf(buf + len, DBG_BSIZE - 64, msg, ap);
-	buf[len++] = ':';
-	buf[len++] = ' ';
-	va_end(ap);
-
-	dlc = cf->can_dlc;
-	if (dlc > 8)
-		dlc = 8;
-
-	if (cf->can_id & CAN_EFF_FLAG)
-		len += sprintf(buf + len, "<%08X> [%X] ",
-			       cf->can_id & CAN_EFF_MASK, dlc);
-	else
-		len += sprintf(buf + len, "<%03X> [%X] ",
-			       cf->can_id & CAN_SFF_MASK, dlc);
-
-	for (i = 0; i < dlc; i++)
-		len += sprintf(buf + len, "%02X ", cf->data[i]);
-
-	if (cf->can_id & CAN_RTR_FLAG)
-		len += sprintf(buf + len, "(RTR)");
-
-	buf[len++] = '\n';
-	buf[len]   = '\0';
-	printk(buf);
-	kfree(buf);
-}
-EXPORT_SYMBOL(can_debug_cframe);
-
-/**
- * can_debug_skb - print socket buffer content to kernel log
- * @skb: pointer to socket buffer
- */
-void can_debug_skb(struct sk_buff *skb)
-{
-	int len, nbytes, i;
-	char *buf;
-
-	buf = kmalloc(DBG_BSIZE, GFP_ATOMIC);
-	if (!buf)
-		return;
-
-	len = sprintf(buf,
-		      KERN_DEBUG "  skbuff at %p, dev: %d, proto: %04x\n"
-		      KERN_DEBUG "  users: %d, dataref: %d, nr_frags: %d, "
-		      "h,d,t,e,l: %p %+d %+d %+d, %d",
-		      skb, skb->dev ? skb->dev->ifindex : -1,
-		      ntohs(skb->protocol),
-		      atomic_read(&skb->users),
-		      atomic_read(&(skb_shinfo(skb)->dataref)),
-		      skb_shinfo(skb)->nr_frags,
-		      skb->head, skb->data - skb->head,
-		      skb->tail - skb->head, skb->end - skb->head, skb->len);
-	nbytes = skb->end - skb->head;
-	for (i = 0; i < nbytes; i++) {
-		if (i % 16 == 0)
-			len += sprintf(buf + len, "\n" KERN_DEBUG "  ");
-		if (len < DBG_BSIZE - 16) {
-			len += sprintf(buf + len, " %02x", skb->head[i]);
-		} else {
-			len += sprintf(buf + len, "...");
-			break;
-		}
-	}
-	buf[len++] = '\n';
-	buf[len]   = '\0';
-	printk(buf);
-	kfree(buf);
-}
-EXPORT_SYMBOL(can_debug_skb);
-
-#endif
-
-/*
  * af_can protocol functions
  */
 
@@ -946,6 +847,105 @@ static int can_notifier(struct notifier_block *nb, unsigned long msg,
 
 	return NOTIFY_DONE;
 }
+
+/*
+ * af_can debugging stuff
+ */
+
+#ifdef CONFIG_CAN_DEBUG_CORE
+
+#define DBG_BSIZE 1024
+
+/**
+ * can_debug_cframe - print CAN frame
+ * @msg: pointer to message printed before the given CAN frame
+ * @cf: pointer to CAN frame
+ */
+void can_debug_cframe(const char *msg, struct can_frame *cf, ...)
+{
+	va_list ap;
+	int len;
+	int dlc, i;
+	char *buf;
+
+	buf = kmalloc(DBG_BSIZE, GFP_ATOMIC);
+	if (!buf)
+		return;
+
+	len = sprintf(buf, KERN_DEBUG);
+	va_start(ap, cf);
+	len += snprintf(buf + len, DBG_BSIZE - 64, msg, ap);
+	buf[len++] = ':';
+	buf[len++] = ' ';
+	va_end(ap);
+
+	dlc = cf->can_dlc;
+	if (dlc > 8)
+		dlc = 8;
+
+	if (cf->can_id & CAN_EFF_FLAG)
+		len += sprintf(buf + len, "<%08X> [%X] ",
+			       cf->can_id & CAN_EFF_MASK, dlc);
+	else
+		len += sprintf(buf + len, "<%03X> [%X] ",
+			       cf->can_id & CAN_SFF_MASK, dlc);
+
+	for (i = 0; i < dlc; i++)
+		len += sprintf(buf + len, "%02X ", cf->data[i]);
+
+	if (cf->can_id & CAN_RTR_FLAG)
+		len += sprintf(buf + len, "(RTR)");
+
+	buf[len++] = '\n';
+	buf[len]   = '\0';
+	printk(buf);
+	kfree(buf);
+}
+EXPORT_SYMBOL(can_debug_cframe);
+
+/**
+ * can_debug_skb - print socket buffer content to kernel log
+ * @skb: pointer to socket buffer
+ */
+void can_debug_skb(struct sk_buff *skb)
+{
+	int len, nbytes, i;
+	char *buf;
+
+	buf = kmalloc(DBG_BSIZE, GFP_ATOMIC);
+	if (!buf)
+		return;
+
+	len = sprintf(buf,
+		      KERN_DEBUG "  skbuff at %p, dev: %d, proto: %04x\n"
+		      KERN_DEBUG "  users: %d, dataref: %d, nr_frags: %d, "
+		      "h,d,t,e,l: %p %+d %+d %+d, %d",
+		      skb, skb->dev ? skb->dev->ifindex : -1,
+		      ntohs(skb->protocol),
+		      atomic_read(&skb->users),
+		      atomic_read(&(skb_shinfo(skb)->dataref)),
+		      skb_shinfo(skb)->nr_frags,
+		      skb->head, skb->data - skb->head,
+		      skb->tail - skb->head, skb->end - skb->head, skb->len);
+	nbytes = skb->end - skb->head;
+	for (i = 0; i < nbytes; i++) {
+		if (i % 16 == 0)
+			len += sprintf(buf + len, "\n" KERN_DEBUG "  ");
+		if (len < DBG_BSIZE - 16) {
+			len += sprintf(buf + len, " %02x", skb->head[i]);
+		} else {
+			len += sprintf(buf + len, "...");
+			break;
+		}
+	}
+	buf[len++] = '\n';
+	buf[len]   = '\0';
+	printk(buf);
+	kfree(buf);
+}
+EXPORT_SYMBOL(can_debug_skb);
+
+#endif
 
 /*
  * af_can module init/exit functions
