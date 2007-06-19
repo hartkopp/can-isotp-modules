@@ -93,6 +93,7 @@ MODULE_PARM_DESC(debug, "debug print mask: 1:debug, 2:frames, 4:skbs");
 struct raw_opt {
 	int bound;
 	int ifindex;
+	struct notifier_block notifier;
 	int loopback;
 	int recv_own_msgs;
 	int count;                 /* number of active filters */
@@ -117,8 +118,6 @@ static inline struct raw_opt *raw_sk(const struct sock *sk)
 	return (struct raw_opt *)sk->sk_protinfo;
 }
 #endif
-
-static void raw_notifier(unsigned long msg, void *data);
 
 static void raw_rcv(struct sk_buff *skb, void *data)
 {
@@ -152,41 +151,108 @@ static void raw_rcv(struct sk_buff *skb, void *data)
 	}
 }
 
-static int raw_add_filters(int ifindex, struct sock *sk)
+static void raw_enable_filters(struct net_device *dev, struct sock *sk)
 {
 	struct raw_opt *ro = raw_sk(sk);
 	struct can_filter *filter = ro->filter;
-	int ret = 0;
 	int i;
 
-	for (i = 0; i < ro->count && !ret; i++) {
-		ret = can_rx_register(ifindex, filter[i].can_id,
-				      filter[i].can_mask,
-				      raw_rcv, sk, IDENT);
+	for (i = 0; i < ro->count; i++) {
 		DBG("filter can_id %08X, can_mask %08X%s, sk %p\n",
 		    filter[i].can_id, filter[i].can_mask,
 		    filter[i].can_id & CAN_INV_FILTER ? " (inv)" : "", sk);
-	}
 
-	return ret;
+		can_rx_register(dev, filter[i].can_id, filter[i].can_mask,
+				raw_rcv, sk, IDENT);
+	}
 }
 
-static int raw_remove_filters(int ifindex, struct sock *sk)
+static void raw_enable_errfilter(struct net_device *dev, struct sock *sk)
+{
+	struct raw_opt *ro = raw_sk(sk);
+
+	if (ro->err_mask)
+		can_rx_register(dev, 0, ro->err_mask | CAN_ERR_FLAG,
+				raw_rcv, sk, IDENT);
+}
+
+static void raw_disable_filters(struct net_device *dev, struct sock *sk)
 {
 	struct raw_opt *ro = raw_sk(sk);
 	struct can_filter *filter = ro->filter;
-	int ret = 0;
 	int i;
 
-	for (i = 0; i < ro->count && !ret; i++) {
-		ret = can_rx_unregister(ifindex, filter[i].can_id,
-					filter[i].can_mask, raw_rcv, sk);
+	for (i = 0; i < ro->count; i++) {
 		DBG("filter can_id %08X, can_mask %08X%s, sk %p\n",
 		    filter[i].can_id, filter[i].can_mask,
 		    filter[i].can_id & CAN_INV_FILTER ? " (inv)" : "", sk);
+
+		can_rx_unregister(dev, filter[i].can_id, filter[i].can_mask,
+				  raw_rcv, sk);
+	}
+}
+
+static void raw_disable_errfilter(struct net_device *dev, struct sock *sk)
+{
+	struct raw_opt *ro = raw_sk(sk);
+
+	if (ro->err_mask)
+		can_rx_unregister(dev, 0, ro->err_mask | CAN_ERR_FLAG,
+				  raw_rcv, sk);
+}
+
+static int raw_notifier(struct notifier_block *nb,
+			unsigned long msg, void *data)
+{
+	struct net_device *dev = (struct net_device *)data;
+	struct raw_opt *ro = container_of(nb, struct raw_opt, notifier);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
+	struct raw_sock *rs = container_of(ro, struct raw_sock, opt);
+	struct sock *sk = &rs->sk;
+#else
+#error TODO (if needed): Notifier support for Kernel Versions < 2.6.12
+#endif
+
+	DBG("msg %ld for dev %p (%s idx %d) sk %p ro->ifindex %d\n",
+	    msg, dev, dev->name, dev->ifindex, sk, ro->ifindex);
+
+	if (dev->type != ARPHRD_CAN)
+		return NOTIFY_DONE;
+
+	if (ro->ifindex != dev->ifindex)
+		return NOTIFY_DONE;
+
+	switch (msg) {
+
+	case NETDEV_UNREGISTER:
+		lock_sock(sk);
+		/* remove current filters & unregister */
+		if (ro->bound) {
+			raw_disable_filters(dev, sk);
+			raw_disable_errfilter(dev, sk);
+		}
+
+		if (ro->count > 1)
+			kfree(ro->filter);
+
+		ro->ifindex = 0;
+		ro->bound   = 0;
+		ro->count   = 0;
+		release_sock(sk);
+
+		sk->sk_err = ENODEV;
+		if (!sock_flag(sk, SOCK_DEAD))
+			sk->sk_error_report(sk);
+		break;
+
+	case NETDEV_DOWN:
+		sk->sk_err = ENETDOWN;
+		if (!sock_flag(sk, SOCK_DEAD))
+			sk->sk_error_report(sk);
+		break;
 	}
 
-	return ret;
+	return NOTIFY_DONE;
 }
 
 static int raw_init(struct sock *sk)
@@ -194,6 +260,7 @@ static int raw_init(struct sock *sk)
 	struct raw_opt *ro = raw_sk(sk);
 
 	ro->bound            = 0;
+	ro->ifindex          = 0;
 
 	/* set default filter to single entry dfilter */
 	ro->dfilter.can_id   = 0;
@@ -205,58 +272,12 @@ static int raw_init(struct sock *sk)
 	ro->loopback         = 1;
 	ro->recv_own_msgs    = 0;
 
-	return 0;
-}
+	/* set notifier */
+	ro->notifier.notifier_call = raw_notifier;
 
-static int raw_unbind(struct sock *sk)
-{
-	struct raw_opt *ro = raw_sk(sk);
-	int ifindex = ro->ifindex;
-
-	/* remove current filters & unregister */
-	raw_remove_filters(ifindex, sk);
-
-	/* remove current error mask */
-	if (ro->err_mask)
-		can_rx_unregister(ifindex, 0, ro->err_mask | CAN_ERR_FLAG,
-				  raw_rcv, sk);
-
-	if (ifindex)
-		can_dev_unregister(ifindex, raw_notifier, sk);
-
-	ro->bound   = 0;
-	ro->ifindex = 0;
+	register_netdevice_notifier(&ro->notifier);
 
 	return 0;
-}
-
-static void raw_notifier(unsigned long msg, void *data)
-{
-	struct sock *sk = (struct sock *)data;
-	//@@@@@ struct raw_opt *ro = raw_sk(sk);
-
-	DBG("called for sock %p\n", sk);
-
-	switch (msg) {
-
-	case NETDEV_DOWN:
-#if 0
-		/*
-		 * TODO:
-		 * - put notifier into raw_opt
-		 * - remove notifier with rcu
-		 * - put notifier list 'device dependend' into dev_rcv_lists
-		 */
-		if (ro->bound) {
-			raw_unbind(sk);
-			raw_init(sk);
-		}
-#endif
-		sk->sk_err = ENETDOWN;
-		if (!sock_flag(sk, SOCK_DEAD))
-			sk->sk_error_report(sk);
-		break;
-	}
 }
 
 static int raw_release(struct socket *sock)
@@ -267,11 +288,33 @@ static int raw_release(struct socket *sock)
 	DBG("socket %p, sk %p, refcnt %d\n", sock, sk,
 	    atomic_read(&sk->sk_refcnt));
 
-	if (ro->bound)
-		raw_unbind(sk);
+	unregister_netdevice_notifier(&ro->notifier);
+
+	lock_sock(sk);
+
+	/* remove current filters & unregister */
+	if (ro->bound) {
+		if (ro->ifindex) {
+			struct net_device *dev = dev_get_by_index(ro->ifindex);
+			if (dev) {
+				raw_disable_filters(dev, sk);
+				raw_disable_errfilter(dev, sk);
+				dev_put(dev);
+			}
+		} else {
+			raw_disable_filters(NULL, sk);
+			raw_disable_errfilter(NULL, sk);
+		}
+	}
+
 	if (ro->count > 1)
 		kfree(ro->filter);
 
+	ro->ifindex = 0;
+	ro->bound   = 0;
+	ro->count   = 0;
+
+	release_sock(sk);
 	sock_put(sk);
 
 	return 0;
@@ -282,7 +325,6 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 	struct sockaddr_can *addr = (struct sockaddr_can *)uaddr;
 	struct sock *sk = sock->sk;
 	struct raw_opt *ro = raw_sk(sk);
-	int ifindex = addr->can_ifindex;
 	int err = 0;
 
 	DBG("socket %p to device %d\n", sock, addr->can_ifindex);
@@ -293,41 +335,57 @@ static int raw_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 	lock_sock(sk);
 
 	if (ro->bound) {
-		/* 
-		 * remove current bindings, filters and notifier but
-		 * do not purge the current local filter content.
-		 */
-		raw_unbind(sk);
+		/* unregister current filters for this device */
+		if (ro->ifindex) {
+			struct net_device *dev = dev_get_by_index(ro->ifindex);
+			if (dev) {
+				raw_disable_filters(dev, sk);
+				raw_disable_errfilter(dev, sk);
+				dev_put(dev);
+			}
+			ro->ifindex = 0;
+
+		} else {
+			raw_disable_filters(NULL, sk);
+			raw_disable_errfilter(NULL, sk);
+		}
+
+		ro->bound = 0;
 	}
 
-	if (ifindex)
-		err = can_dev_register(ifindex, raw_notifier, sk);
+	if (addr->can_ifindex) {
+		struct net_device *dev = dev_get_by_index(addr->can_ifindex);
+		if (!dev) {
+			DBG("could not find device %d\n", addr->can_ifindex);
+			err = -ENODEV;
+			goto out;
+		}
+		if (dev->type != ARPHRD_CAN) {
+			DBG("device %d no CAN device\n", addr->can_ifindex);
+			dev_put(dev);
+			err = -ENODEV;
+			goto out;
+		}
+		if (!(dev->flags & IFF_UP)) {
+			sk->sk_err = ENETDOWN;
+			if (!sock_flag(sk, SOCK_DEAD))
+				sk->sk_error_report(sk);
+		}
+		ro->ifindex = dev->ifindex;
 
-	if (err)
-		goto out;
+		/* filters set by default/setsockopt */
+		raw_enable_filters(dev, sk);
+		raw_enable_errfilter(dev, sk);
+		dev_put(dev);
 
-	/* filters set by default/setsockopt */
-	err = raw_add_filters(ifindex, sk);
-	if (err) {
-		raw_remove_filters(ifindex, sk);
-		if (ifindex)
-			can_dev_unregister(ifindex, raw_notifier, sk);
-		goto out;
+	} else {
+		ro->ifindex = 0;
+
+		/* filters set by default/setsockopt */
+		raw_enable_filters(NULL, sk);
+		raw_enable_errfilter(NULL, sk);
 	}
 
-	/* error frame filter set by setsockopt */
-	if (ro->err_mask)
-		err = can_rx_register(ifindex, 0,
-				      ro->err_mask | CAN_ERR_FLAG,
-				      raw_rcv, sk, IDENT);
-	if (err) {
-		raw_remove_filters(ifindex, sk);
-		if (ifindex)
-			can_dev_unregister(ifindex, raw_notifier, sk);
-		goto out;
-	}
-	
-	ro->ifindex = ifindex;
 	ro->bound = 1;
 
  out:
@@ -348,6 +406,7 @@ static int raw_getname(struct socket *sock, struct sockaddr *uaddr,
 
 	addr->can_family  = AF_CAN;
 	addr->can_ifindex = ro->ifindex;
+
 	*len = sizeof(*addr);
 
 	return 0;
@@ -371,9 +430,10 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 	struct raw_opt *ro = raw_sk(sk);
 	struct can_filter *filter = NULL;  /* dyn. alloc'ed filters */
 	struct can_filter sfilter;         /* single filter */
+	struct net_device *dev = NULL;
 	can_err_mask_t err_mask = 0;
 	int count = 0;
-	int err = 0;
+	int err;
 
 	if (level != SOL_CAN_RAW)
 		return -EINVAL;
@@ -407,9 +467,12 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 
 		lock_sock(sk);
 
+		if (ro->bound && ro->ifindex)
+			dev = dev_get_by_index(ro->ifindex);
+
 		/* remove current filters & unregister */
 		if (ro->bound)
-			raw_remove_filters(ro->ifindex, sk);
+			raw_disable_filters(dev, sk);
 
 		if (ro->count > 1)
 			kfree(ro->filter);
@@ -424,7 +487,10 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 		ro->filter = filter;
 		ro->count  = count;
 		if (ro->bound)
-			err = raw_add_filters(ro->ifindex, sk);
+			raw_enable_filters(dev, sk);
+
+		if (dev)
+			dev_put(dev);
 
 		release_sock(sk);
 
@@ -440,18 +506,26 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 
 		err_mask &= CAN_ERR_MASK;
 
+		lock_sock(sk);
+
+		if (ro->bound && ro->ifindex)
+			dev = dev_get_by_index(ro->ifindex);
+
 		/* remove current error mask */
-		if (ro->err_mask && ro->bound)
-			can_rx_unregister(ro->ifindex, 0, 
-					  ro->err_mask | CAN_ERR_FLAG,
-					  raw_rcv, sk);
+		if (ro->bound)
+			raw_disable_errfilter(dev, sk);
+
+		ro->err_mask = err_mask;
 
 		/* add new error mask */
-		ro->err_mask = err_mask;
-		if (ro->err_mask && ro->bound)
-			err = can_rx_register(ro->ifindex, 0,
-					      ro->err_mask | CAN_ERR_FLAG,
-					      raw_rcv, sk, IDENT);
+		if (ro->bound)
+			raw_enable_errfilter(dev, sk);
+
+		if (dev)
+			dev_put(dev);
+
+		release_sock(sk);
+
 		break;
 
 	case CAN_RAW_LOOPBACK:
@@ -477,7 +551,7 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 	default:
 		return -ENOPROTOOPT;
 	}
-	return err;
+	return 0;
 }
 
 static int raw_getsockopt(struct socket *sock, int level, int optname,

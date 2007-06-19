@@ -110,11 +110,13 @@ struct bcm_op {
 	struct can_frame sframe;
 	struct can_frame last_sframe;
 	struct sock *sk;
+	struct net_device *rx_reg_dev;
 };
 
 struct bcm_opt {
 	int bound;
 	int ifindex;
+	struct notifier_block notifier;
 	struct list_head rx_ops;
 	struct list_head tx_ops;
 	unsigned long dropped_usr_msgs;
@@ -176,8 +178,6 @@ static inline void skb_set_timestamp(struct sk_buff *skb,
 #define CFSIZ sizeof(struct can_frame)
 #define OPSIZ sizeof(struct bcm_op)
 #define MHSIZ sizeof(struct bcm_msg_head)
-
-static void bcm_notifier(unsigned long msg, void *data);
 
 /*
  * rounded_tv2jif - calculate jiffies from timeval including optional up
@@ -822,6 +822,19 @@ static void bcm_remove_op(struct bcm_op *op)
 	return;
 }
 
+static void bcm_rx_unreg(struct net_device *dev, struct bcm_op *op)
+{
+	if (op->rx_reg_dev == dev) {
+		can_rx_unregister(dev, op->can_id, REGMASK(op->can_id),
+				  bcm_rx_handler, op);
+
+		/* mark as removed subscription */
+		op->rx_reg_dev = NULL;
+	} else
+		printk(KERN_ERR "can-bcm: bcm_rx_unreg: registered device "
+		       "mismatch %p %p\n", op->rx_reg_dev, dev);
+}
+
 /*
  * bcm_delete_rx_op - find and remove a rx op (returns number of removed ops)
  */
@@ -839,9 +852,25 @@ static int bcm_delete_rx_op(struct list_head *ops, canid_t can_id, int ifindex)
 			 * problems) can_rx_unregister() is always a save
 			 * thing to do here.
 			 */
-			can_rx_unregister(op->ifindex, op->can_id,
-					  REGMASK(op->can_id),
-					  bcm_rx_handler, op);
+			if (op->ifindex) {
+				/*
+				 * Only remove subscriptions that had not
+				 * been removed due to NETDEV_UNREGISTER
+				 * in bcm_notifier()
+				 */
+				if (op->rx_reg_dev) {
+					struct net_device *dev;
+
+					dev = dev_get_by_index(op->ifindex);
+					if (dev) {
+						bcm_rx_unreg(dev, op);
+						dev_put(dev);
+					}
+				}
+			} else
+				can_rx_unregister(NULL, op->can_id,
+						  REGMASK(op->can_id),
+						  bcm_rx_handler, op);
 
 			list_del(&op->list);
 			bcm_remove_op(op);
@@ -1291,8 +1320,20 @@ static int bcm_rx_setup(struct bcm_msg_head *msg_head, struct msghdr *msg,
 		DBG("RX_SETUP: can_rx_register() for can_id %03X. "
 		    "rx_op is %p\n", op->can_id, op);
 
-		can_rx_register(ifindex, op->can_id, REGMASK(op->can_id),
-				bcm_rx_handler, op, IDENT);
+		if (ifindex) {
+			struct net_device *dev = dev_get_by_index(ifindex);
+
+			if (dev) {
+				can_rx_register(dev, op->can_id,
+						REGMASK(op->can_id),
+						bcm_rx_handler, op, IDENT);
+				op->rx_reg_dev = dev;
+				dev_put(dev);
+			}
+
+		} else
+			can_rx_register(NULL, op->can_id, REGMASK(op->can_id),
+					bcm_rx_handler, op, IDENT);
 	}
 
 	return msg_head->nframes * CFSIZ + MHSIZ;
@@ -1369,10 +1410,22 @@ static int bcm_sendmsg(struct kiocb *iocb, struct socket *sock,
 
 		ifindex = addr->can_ifindex; /* ifindex from sendto() */
 
-		if (ifindex && !dev_get_by_index(ifindex)) {
-			DBG("device %d not found\n", ifindex);
-			return -ENODEV;
-		}
+		if (ifindex) {
+			struct net_device *dev = dev_get_by_index(ifindex);
+
+			if (!dev) {
+				DBG("device %d not found\n", ifindex);
+				return -ENODEV;
+			}
+
+			if (dev->type != ARPHRD_CAN) {
+				DBG("device %d no CAN device\n", ifindex);
+				dev_put(dev);
+				return -ENODEV;
+			}
+
+			dev_put(dev);
+                }
 	}
 
 	/* read message head information */
@@ -1441,6 +1494,66 @@ static int bcm_sendmsg(struct kiocb *iocb, struct socket *sock,
 }
 
 /*
+ * notification handler for netdevice status changes
+ */
+static int bcm_notifier(struct notifier_block *nb, unsigned long msg,
+			void *data)
+{
+	struct net_device *dev = (struct net_device *)data;
+	struct bcm_opt *bo = container_of(nb, struct bcm_opt, notifier);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
+	struct bcm_sock *bs = container_of(bo, struct bcm_sock, opt);
+	struct sock *sk = &bs->sk;
+#else
+#error TODO (if needed): Notifier support for Kernel Versions < 2.6.12
+#endif
+	struct bcm_op *op;
+	int notify_enodev = 0;
+
+	DBG("msg %ld for dev %p (%s idx %d) sk %p bo->ifindex %d\n",
+	    msg, dev, dev->name, dev->ifindex, sk, bo->ifindex);
+
+	if (dev->type != ARPHRD_CAN)
+		return NOTIFY_DONE;
+
+	switch (msg) {
+
+	case NETDEV_UNREGISTER:
+		lock_sock(sk);
+
+		/* remove device specific receive entries */
+		list_for_each_entry(op, &bo->rx_ops, list)
+			if (op->rx_reg_dev == dev)
+				bcm_rx_unreg(dev, op);
+
+		/* remove device reference, if this is our bound device */
+		if (bo->bound && bo->ifindex == dev->ifindex) {
+			bo->bound   = 0;
+			bo->ifindex = 0;
+			notify_enodev = 1;
+		}
+
+		release_sock(sk);
+
+		if (notify_enodev) {
+			sk->sk_err = ENODEV;
+			if (!sock_flag(sk, SOCK_DEAD))
+				sk->sk_error_report(sk);
+		}
+		break;
+
+	case NETDEV_DOWN:
+		if (bo->bound && bo->ifindex == dev->ifindex) {
+			sk->sk_err = ENETDOWN;
+			if (!sock_flag(sk, SOCK_DEAD))
+				sk->sk_error_report(sk);
+		}
+	}
+
+	return NOTIFY_DONE;
+}
+
+/*
  * initial settings for all BCM sockets to be set at socket creation time
  */
 static int bcm_init(struct sock *sk)
@@ -1455,17 +1568,30 @@ static int bcm_init(struct sock *sk)
 	INIT_LIST_HEAD(&bo->tx_ops);
 	INIT_LIST_HEAD(&bo->rx_ops);
 
+	/* set notifier */
+	bo->notifier.notifier_call = bcm_notifier;
+
+	register_netdevice_notifier(&bo->notifier);
+
 	return 0;
 }
 
-static int bcm_unbind(struct sock *sk)
+/*
+ * standard socket functions
+ */
+static int bcm_release(struct socket *sock)
 {
+	struct sock *sk = sock->sk;
 	struct bcm_opt *bo = bcm_sk(sk);
 	struct bcm_op *op, *next;
 
 	DBG("socket %p, sk %p\n", sock, sk);
 
 	/* remove bcm_ops, timer, rx_unregister(), etc. */
+
+	unregister_netdevice_notifier(&bo->notifier);
+
+	lock_sock(sk);
 
 	list_for_each_entry_safe(op, next, &bo->tx_ops, list) {
 		DBG("removing tx_op %p for can_id %03X\n", op, op->can_id);
@@ -1479,9 +1605,25 @@ static int bcm_unbind(struct sock *sk)
 		 * Don't care if we're bound or not (due to netdev problems)
 		 * can_rx_unregister() is always a save thing to do here.
 		 */
-		can_rx_unregister(op->ifindex, op->can_id,
-				  REGMASK(op->can_id),
-				  bcm_rx_handler, op);
+		if (op->ifindex) {
+			/*
+			 * Only remove subscriptions that had not
+			 * been removed due to NETDEV_UNREGISTER
+			 * in bcm_notifier()
+			 */
+			if (op->rx_reg_dev) {
+				struct net_device *dev;
+
+				dev = dev_get_by_index(op->ifindex);
+				if (dev) {
+					bcm_rx_unreg(dev, op);
+					dev_put(dev);
+				}
+			}
+		} else
+			can_rx_unregister(NULL, op->can_id,
+					  REGMASK(op->can_id),
+					  bcm_rx_handler, op);
 
 		bcm_remove_op(op);
 	}
@@ -1490,55 +1632,13 @@ static int bcm_unbind(struct sock *sk)
 	if (proc_dir && bo->bcm_proc_read)
 		remove_proc_entry(bo->procname, proc_dir);
 
-	/* remove device notifier */
-	if (bo->ifindex)
-		can_dev_unregister(bo->ifindex, bcm_notifier, sk);
-
-	return 0;
-}
-
-/*
- * notification handler for netdevice status changes
- */
-static void bcm_notifier(unsigned long msg, void *data)
-{
-	struct sock *sk = (struct sock *)data;
-	//@@@@@@ struct bcm_opt *bo = bcm_sk(sk);
-
-	DBG("called for sock %p\n", sk);
-
-	switch (msg) {
-
-	case NETDEV_DOWN:
-#if 0
-		/*
-		 * TODO:
-		 * - put notifier into bcm_opt
-		 * - remove notifier with rcu
-		 * - put notifier list 'device dependend' into dev_rcv_lists
-		 */
-		if (bo->bound) {
-			bcm_unbind(sk);
-			bcm_init(sk);
-		}
-#endif
-		sk->sk_err = ENETDOWN;
-		if (!sock_flag(sk, SOCK_DEAD))
-			sk->sk_error_report(sk);
+	/* remove device reference */
+	if (bo->bound) {
+		bo->bound   = 0;
+		bo->ifindex = 0;
 	}
-}
 
-/*
- * standard socket functions
- */
-static int bcm_release(struct socket *sock)
-{
-	struct sock *sk = sock->sk;
-	struct bcm_opt *bo = bcm_sk(sk);
-
-	if (bo->bound)
-		bcm_unbind(sk);
-
+	release_sock(sk);
 	sock_put(sk);
 
 	return 0;
@@ -1556,16 +1656,29 @@ static int bcm_connect(struct socket *sock, struct sockaddr *uaddr, int len,
 
 	/* bind a device to this socket */
 	if (addr->can_ifindex) {
-		int ret;
+		struct net_device *dev = dev_get_by_index(addr->can_ifindex);
 
-		ret = can_dev_register(addr->can_ifindex, bcm_notifier, sk);
-		if (ret)
-			return ret;
+		if (!dev) {
+			DBG("could not find device index %d\n",
+			    addr->can_ifindex);
+			return -ENODEV;
+		}
 
-		bo->ifindex = addr->can_ifindex;
+		if (dev->type != ARPHRD_CAN) {
+			DBG("device %d no CAN device\n", addr->can_ifindex);
+			dev_put(dev);
+			return -ENODEV;
+		}
 
-		DBG("socket %p bound to interface index %d\n",
-		    sock, bo->ifindex);
+		bo->ifindex = dev->ifindex;
+		dev_put(dev);
+
+		DBG("socket %p bound to device %s (idx %d)\n",
+		    sock, dev->name, dev->ifindex);
+
+	} else {
+		/* no interface reference for ifindex = 0 ('any' CAN device) */
+		bo->ifindex = 0;
 	}
 
 	bo->bound = 1;
