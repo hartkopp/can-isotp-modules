@@ -882,11 +882,11 @@ static int can_notifier(struct notifier_block *nb, unsigned long msg,
 	struct net_device *dev = (struct net_device *)data;
 	struct dev_rcv_lists *d;
 
-	if (dev->type != ARPHRD_CAN)
-		return NOTIFY_DONE;
-
 	DBG("msg %ld for dev %p (%s idx %d)\n",
 	    msg, dev, dev->name, dev->ifindex);
+
+	if (dev->type != ARPHRD_CAN)
+		return NOTIFY_DONE;
 
 	switch (msg) {
 
