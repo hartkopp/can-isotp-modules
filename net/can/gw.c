@@ -1,7 +1,7 @@
 /*
  * gw.c - CAN frame Gateway/Router/Bridge with netlink interface
  *
- * Copyright (c) 2002-2010 Volkswagen Group Electronic Research
+ * Copyright (c) 2011 Volkswagen Group Electronic Research
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without

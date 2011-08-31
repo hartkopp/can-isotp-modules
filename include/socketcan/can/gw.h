@@ -6,7 +6,7 @@
  * $Id$
  *
  * Author: Oliver Hartkopp <oliver.hartkopp@volkswagen.de>
- * Copyright (c) 2002-2010 Volkswagen Group Electronic Research
+ * Copyright (c) 2011 Volkswagen Group Electronic Research
  * All rights reserved.
  *
  * Send feedback to <socketcan-users@lists.berlios.de>
