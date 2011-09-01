@@ -936,15 +936,24 @@ static __init int cgw_module_init(void)
 	notifier.notifier_call = cgw_notifier;
 	register_netdevice_notifier(&notifier);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0)
+	if (__rtnl_register(PF_CAN, RTM_GETROUTE, NULL, cgw_dump_jobs, NULL)) {
+#else
 	if (__rtnl_register(PF_CAN, RTM_GETROUTE, NULL, cgw_dump_jobs)) {
+#endif
 		unregister_netdevice_notifier(&notifier);
 		kmem_cache_destroy(cgw_cache);
 		return -ENOBUFS;
 	}
 
 	/* Only the first call to __rtnl_register can fail */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0)
+	__rtnl_register(PF_CAN, RTM_NEWROUTE, cgw_create_job, NULL, NULL);
+	__rtnl_register(PF_CAN, RTM_DELROUTE, cgw_remove_job, NULL, NULL);
+#else
 	__rtnl_register(PF_CAN, RTM_NEWROUTE, cgw_create_job, NULL);
 	__rtnl_register(PF_CAN, RTM_DELROUTE, cgw_remove_job, NULL);
+#endif
 
 	return 0;
 }
