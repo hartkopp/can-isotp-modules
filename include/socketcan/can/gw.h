@@ -16,6 +16,7 @@
 #ifndef CAN_GW_H
 #define CAN_GW_H
 
+#include <linux/types.h>
 #include <socketcan/can.h>
 
 struct rtcanmsg {
