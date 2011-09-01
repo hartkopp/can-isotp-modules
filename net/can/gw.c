@@ -143,8 +143,8 @@ struct cgw_job {
 
 /* modification functions that are invoked in the hot path in can_can_gw_rcv */
 
-#define MODFUNC(func, op) static void func (struct can_frame *cf, \
-					    struct cf_mod *mod) { op ; }
+#define MODFUNC(func, op) static void func(struct can_frame *cf, \
+					   struct cf_mod *mod) { op ; }
 
 MODFUNC(mod_and_id, cf->can_id &= mod->modframe.and.can_id)
 MODFUNC(mod_and_dlc, cf->can_dlc &= mod->modframe.and.can_dlc)
@@ -174,10 +174,10 @@ static inline void canframecpy(struct can_frame *dst, struct can_frame *src)
 
 static int cgw_chk_csum_parms(s8 fr, s8 to, s8 re)
 {
-	/* 
+	/*
 	 * absolute dlc values 0 .. 7 => 0 .. 7, e.g. data [0]
 	 * relative to received dlc -1 .. -8 :
-	 * e.g. for received dlc = 8 
+	 * e.g. for received dlc = 8
 	 * -1 => index = 7 (data[7])
 	 * -3 => index = 5 (data[5])
 	 * -8 => index = 0 (data[0])
@@ -189,7 +189,7 @@ static int cgw_chk_csum_parms(s8 fr, s8 to, s8 re)
 		return 0;
 	else
 		return -EINVAL;
-} 
+}
 
 static inline int calc_idx(int idx, int rx_dlc)
 {
@@ -212,10 +212,10 @@ static void cgw_csum_xor_rel(struct can_frame *cf, struct cgw_csum_xor *xor)
 
 	if (from <= to) {
 		for (i = from; i <= to; i++)
-			val ^= cf->data[i]; 
+			val ^= cf->data[i];
 	} else {
 		for (i = from; i >= to; i--)
-			val ^= cf->data[i]; 
+			val ^= cf->data[i];
 	}
 
 	cf->data[res] = val;
@@ -444,7 +444,7 @@ static int cgw_notifier(struct notifier_block *nb,
 
 		hlist_for_each_entry_safe(gwj, n, nx, &cgw_list, list) {
 
-			if (gwj->src.dev == dev || gwj->dst.dev == dev) { 
+			if (gwj->src.dev == dev || gwj->dst.dev == dev) {
 				hlist_del(&gwj->list);
 				cgw_unregister_filter(gwj);
 				kfree(gwj);
@@ -595,7 +595,7 @@ cont:
 }
 
 /* check for common and gwtype specific attributes */
-static int cgw_parse_attr(struct nlmsghdr *nlh, struct cf_mod *mod, 
+static int cgw_parse_attr(struct nlmsghdr *nlh, struct cf_mod *mod,
 			  u8 gwtype, void *gwtypeattr)
 {
 	struct nlattr *tb[CGW_MAX+1];
@@ -604,7 +604,7 @@ static int cgw_parse_attr(struct nlmsghdr *nlh, struct cf_mod *mod,
 	int err = 0;
 
 	/* initialize modification & checksum data space */
-	memset(mod, 0, sizeof(*mod)); 
+	memset(mod, 0, sizeof(*mod));
 
 	err = nlmsg_parse(nlh, sizeof(struct rtcanmsg), tb, CGW_MAX, NULL);
 	if (err < 0)
@@ -743,7 +743,7 @@ static int cgw_parse_attr(struct nlmsghdr *nlh, struct cf_mod *mod,
 		/* check CGW_TYPE_CAN_CAN specific attributes */
 
 		struct can_can_gw *ccgw = (struct can_can_gw *)gwtypeattr;
-		memset(ccgw, 0, sizeof(*ccgw)); 
+		memset(ccgw, 0, sizeof(*ccgw));
 
 		/* check for can_filter in attributes */
 		if (tb[CGW_FILTER] &&
@@ -834,10 +834,10 @@ static int cgw_create_job(struct sk_buff *skb,  struct nlmsghdr *nlh,
 
 	if (gwj->dst.dev->type != ARPHRD_CAN)
 		goto put_src_dst_out;
-		
+
 	if (gwj->dst.dev->header_ops)
 		goto put_src_dst_out;
-		
+
 	ASSERT_RTNL();
 
 	err = cgw_register_filter(gwj);

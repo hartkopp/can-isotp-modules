@@ -1,7 +1,7 @@
 /*
  * socketcan/can/gw.h
  *
- * Definitions for CAN frame Gateway/Router/Bridge 
+ * Definitions for CAN frame Gateway/Router/Bridge
  *
  * $Id$
  *
@@ -78,7 +78,7 @@ struct cgw_csum_xor {
 	__s8 to_idx;
 	__s8 result_idx;
 	__u8 init_xor_val;
-} __attribute__ ((packed));
+} __attribute__((packed));
 
 struct cgw_csum_crc8 {
 	__s8 from_idx;
@@ -89,7 +89,7 @@ struct cgw_csum_crc8 {
 	__u8 crctab[256];
 	__u8 profile;
 	__u8 profile_data[20];
-} __attribute__ ((packed));
+} __attribute__((packed));
 
 /* length of checksum operation parameters. idx = index in CAN frame data[] */
 #define CGW_CS_XOR_LEN  sizeof(struct cgw_csum_xor)
@@ -131,7 +131,7 @@ enum {
  * The XOR checksum is calculated like this:
  *
  * xor = init_xor_val
- * 
+ *
  * for (i = from_idx .. to_idx)
  *      xor ^= can_frame.data[i]
  *
@@ -145,7 +145,7 @@ enum {
  * The CRC8 checksum is calculated like this:
  *
  * crc = init_crc_val
- * 
+ *
  * for (i = from_idx .. to_idx)
  *      crc = crctab[ crc ^ can_frame.data[i] ]
  *
