@@ -54,6 +54,8 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/init.h>
+#include <linux/interrupt.h>
+#include <linux/hrtimer.h>
 #include <linux/wait.h>
 #include <linux/uio.h>
 #include <linux/net.h>
