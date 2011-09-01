@@ -936,7 +936,7 @@ static __init int cgw_module_init(void)
 	notifier.notifier_call = cgw_notifier;
 	register_netdevice_notifier(&notifier);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,1,0)
 	if (__rtnl_register(PF_CAN, RTM_GETROUTE, NULL, cgw_dump_jobs, NULL)) {
 #else
 	if (__rtnl_register(PF_CAN, RTM_GETROUTE, NULL, cgw_dump_jobs)) {
@@ -947,7 +947,7 @@ static __init int cgw_module_init(void)
 	}
 
 	/* Only the first call to __rtnl_register can fail */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,1,0)
 	__rtnl_register(PF_CAN, RTM_NEWROUTE, cgw_create_job, NULL, NULL);
 	__rtnl_register(PF_CAN, RTM_DELROUTE, cgw_remove_job, NULL, NULL);
 #else
