@@ -821,10 +821,8 @@ static int cgw_create_job(struct sk_buff *skb,  struct nlmsghdr *nlh,
 	if (!gwj->src.dev)
 		goto out;
 
-	if (gwj->src.dev->type != ARPHRD_CAN)
-		goto put_src_out;
-
-	if (gwj->src.dev->header_ops)
+	/* check for CAN netdev not using header_ops - see gw_rcv() */
+	if (gwj->src.dev->type != ARPHRD_CAN || gwj->src.dev->header_ops)
 		goto put_src_out;
 
 	gwj->dst.dev = dev_get_by_index(&init_net, gwj->ccgw.dst_idx);
@@ -832,10 +830,8 @@ static int cgw_create_job(struct sk_buff *skb,  struct nlmsghdr *nlh,
 	if (!gwj->dst.dev)
 		goto put_src_out;
 
-	if (gwj->dst.dev->type != ARPHRD_CAN)
-		goto put_src_dst_out;
-
-	if (gwj->dst.dev->header_ops)
+	/* check for CAN netdev not using header_ops - see gw_rcv() */
+	if (gwj->dst.dev->type != ARPHRD_CAN || gwj->dst.dev->header_ops)
 		goto put_src_dst_out;
 
 	ASSERT_RTNL();
