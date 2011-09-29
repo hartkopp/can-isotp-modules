@@ -416,9 +416,6 @@ static void bcm_tx_timeout_handler(unsigned long data)
 
 			bcm_send_to_user(op, &msg_head, NULL, 0);
 		}
-	}
-
-	if (op->j_ival1 && (op->count > 0)) {
 
 		/* send (next) frame */
 		bcm_can_tx(op);
@@ -958,15 +955,19 @@ static int bcm_tx_setup(struct bcm_msg_head *msg_head, struct msghdr *msg,
 		/* spec: send can_frame when starting timer */
 		op->flags |= TX_ANNOUNCE;
 
-		if (op->j_ival1 && (op->count > 0)) {
+		/* only start timer when having more frames than sent below */
+		if (op->j_ival1 && (op->count > 1)) {
 			/* op->count-- is done in bcm_tx_timeout_handler */
 			mod_timer(&op->timer, jiffies + op->j_ival1);
 		} else
 			mod_timer(&op->timer, jiffies + op->j_ival2);
 	}
 
-	if (op->flags & TX_ANNOUNCE)
+	if (op->flags & TX_ANNOUNCE) {
 		bcm_can_tx(op);
+		if (op->j_ival1 && (op->count > 0))
+			op->count--;
+	}
 
 	return msg_head->nframes * CFSIZ + MHSIZ;
 }
