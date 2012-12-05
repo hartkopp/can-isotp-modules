@@ -36,6 +36,8 @@
 					/* ignore received CF frames which */
 					/* timestamps differ less than val */
 
+#define CAN_ISOTP_PDU_OPTS	5	/* pass struct can_isotp_pdu_options */
+
 struct can_isotp_options {
 
 	__u32 flags;		/* set flags for isotp behaviour.	*/
@@ -70,6 +72,21 @@ struct can_isotp_fc_options {
 				/* __u8 value : 0 = omit FC N_PDU WT	*/
 };
 
+struct can_isotp_pdu_options {
+
+	__u8  lldl;		/* link layer data length in bytes	*/
+				/* (configured maximum payload length)	*/
+				/* __u8 value : 8,12,16,20,24,32,48,64	*/
+
+	__u8  mtu;		/* generated CAN frame type		*/
+				/* __u8 value :				*/
+				/* CAN_MTU   (16) -> standard CAN 2.0	*/
+				/* CANFD_MTU (72) -> CAN FD frame	*/
+
+	__u8  flags;		/* set into struct canfd_frame.flags	*/
+				/* at frame creation: e.g. CANFD_BRS	*/
+};
+
 
 /* flags for isotp behaviour */
 
@@ -88,12 +105,15 @@ struct can_isotp_fc_options {
 
 #define CAN_ISOTP_DEFAULT_FLAGS		0
 #define CAN_ISOTP_DEFAULT_EXT_ADDRESS	0x00
-#define CAN_ISOTP_DEFAULT_RXPAD_CONTENT	0x00
-#define CAN_ISOTP_DEFAULT_TXPAD_CONTENT	0x00
+#define CAN_ISOTP_DEFAULT_RXPAD_CONTENT	0x55 /* prevent bit-stuffing */
+#define CAN_ISOTP_DEFAULT_TXPAD_CONTENT	0xAA /* prevent bit-stuffing */
 #define CAN_ISOTP_DEFAULT_FRAME_TXTIME	0
 #define CAN_ISOTP_DEFAULT_RECV_BS	0
 #define CAN_ISOTP_DEFAULT_RECV_STMIN	0x00
 #define CAN_ISOTP_DEFAULT_RECV_WFTMAX	0
+#define CAN_ISOTP_DEFAULT_PDU_LLDL	CAN_MAX_DLEN
+#define CAN_ISOTP_DEFAULT_PDU_MTU	CAN_MTU
+#define CAN_ISOTP_DEFAULT_PDU_FLAGS	0
 
 /*
  * Remark on CAN_ISOTP_DEFAULT_RECV_* values:
