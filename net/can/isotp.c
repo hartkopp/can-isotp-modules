@@ -368,14 +368,14 @@ static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
 	int len;
 	struct sk_buff *nskb;
 
+	hrtimer_cancel(&so->rxtimer);
+	so->rx.state = ISOTP_IDLE;
+
 	/* SF PDU or LSF PDU ? */
 	if (so->pdu.lldl == CAN_MAX_DLEN)
 		len = cf->data[ae] & 0x0F;
 	else
 		len = cf->data[ae] & 0x3F;
-
-	hrtimer_cancel(&so->rxtimer);
-	so->rx.state = ISOTP_IDLE;
 
 	if (!len || len > so->pdu.lldl - N_PCI_SZ ||
 	    (ae && len > so->pdu.lldl - N_PCI_SZ - 1))
