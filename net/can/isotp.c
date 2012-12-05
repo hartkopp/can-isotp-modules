@@ -144,7 +144,7 @@ struct isotp_sock {
 	struct tasklet_struct txtsklet;
 	struct can_isotp_options opt;
 	struct can_isotp_fc_options rxfc, txfc;
-	struct can_isotp_pdu_options pdu;
+	struct can_isotp_ll_options ll;
 	__u32 force_tx_stmin;
 	__u32 force_rx_stmin;
 	struct tpcon rx, tx;
@@ -186,7 +186,7 @@ static int isotp_send_fc(struct sock *sk, int ae)
 	struct canfd_frame *ncf;
 	struct isotp_sock *so = isotp_sk(sk);
 
-	nskb = alloc_skb(so->pdu.mtu, gfp_any());
+	nskb = alloc_skb(so->ll.mtu, gfp_any());
 	if (!nskb)
 		return 1;
 
@@ -198,7 +198,7 @@ static int isotp_send_fc(struct sock *sk, int ae)
 	nskb->dev = dev;
 	nskb->sk = sk;
 	ncf = (struct canfd_frame *) nskb->data;
-	skb_put(nskb, so->pdu.mtu);
+	skb_put(nskb, so->ll.mtu);
 
 	/* create & send flow control reply */
 	ncf->can_id = so->txid;
@@ -216,8 +216,8 @@ static int isotp_send_fc(struct sock *sk, int ae)
 	if (ae)
 		ncf->data[0] = so->opt.ext_address;
 
-	if (so->pdu.mtu == CANFD_MTU)
-		ncf->flags = so->pdu.flags;
+	if (so->ll.mtu == CANFD_MTU)
+		ncf->flags = so->ll.flags;
 
 	can_send(nskb, 1);
 	dev_put(dev);
@@ -372,13 +372,13 @@ static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
 	so->rx.state = ISOTP_IDLE;
 
 	/* SF PDU or LSF PDU ? */
-	if (so->pdu.lldl == CAN_MAX_DLEN)
+	if (so->ll.dl == CAN_MAX_DLEN)
 		len = cf->data[ae] & 0x0F;
 	else
 		len = cf->data[ae] & 0x3F;
 
-	if (!len || len > so->pdu.lldl - N_PCI_SZ ||
-	    (ae && len > so->pdu.lldl - N_PCI_SZ - 1))
+	if (!len || len > so->ll.dl - N_PCI_SZ ||
+	    (ae && len > so->ll.dl - N_PCI_SZ - 1))
 		return 1;
 
 	if ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
@@ -405,18 +405,18 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
 
-	if (cf->len != so->pdu.lldl)
+	if (cf->len != so->ll.dl)
 		return 1;
 
 	so->rx.len = (cf->data[ae] & 0x0F) << 8;
 	so->rx.len += cf->data[ae + 1];
 
-	if (so->rx.len + ae < so->pdu.lldl)
+	if (so->rx.len + ae < so->ll.dl)
 		return 1;
 
 	/* copy the first received data bytes */
 	so->rx.idx = 0;
-	for (i = ae+2; i < so->pdu.lldl; i++)
+	for (i = ae+2; i < so->ll.dl; i++)
 		so->rx.buf[so->rx.idx++] = cf->data[i];
 
 	/* initial setup for this pdu receiption */
@@ -570,7 +570,7 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 static void isotp_fill_dataframe(struct canfd_frame *cf, struct isotp_sock *so,
 				 int ae)
 {
-	unsigned char space = so->pdu.lldl - N_PCI_SZ - ae;
+	unsigned char space = so->ll.dl - N_PCI_SZ - ae;
 	int num = min_t(int, so->tx.len - so->tx.idx, space);
 	int i;
 
@@ -603,7 +603,7 @@ static void isotp_create_fframe(struct canfd_frame *cf, struct isotp_sock *so,
 	int i;
 
 	cf->can_id = so->txid;
-	cf->len = so->pdu.lldl;
+	cf->len = so->ll.dl;
 	if (ae)
 		cf->data[0] = so->opt.ext_address;
 
@@ -612,7 +612,7 @@ static void isotp_create_fframe(struct canfd_frame *cf, struct isotp_sock *so,
 	cf->data[ae + 1] = (u8) so->tx.len & 0xFFU;
 
 	/* add first data bytes depending on ae */
-	for (i = ae + 2; i < so->pdu.lldl; i++)
+	for (i = ae + 2; i < so->ll.dl; i++)
 		cf->data[i] = so->tx.buf[so->tx.idx++];
 
 	so->tx.sn = 1;
@@ -659,14 +659,14 @@ static void isotp_tx_timer_tsklet(unsigned long data)
 			break;
 
 isotp_tx_burst:
-		skb = alloc_skb(so->pdu.mtu, gfp_any());
+		skb = alloc_skb(so->ll.mtu, gfp_any());
 		if (!skb) {
 			dev_put(dev);
 			break;
 		}
 
 		cf = (struct canfd_frame *)skb->data;
-		skb_put(skb, so->pdu.mtu);
+		skb_put(skb, so->ll.mtu);
 
 		/* create consecutive frame */
 		isotp_fill_dataframe(cf, so, ae);
@@ -676,8 +676,8 @@ isotp_tx_burst:
 		so->tx.sn %= 16;
 		so->tx.bs++;
 
-		if (so->pdu.mtu == CANFD_MTU)
-			cf->flags = so->pdu.flags;
+		if (so->ll.mtu == CANFD_MTU)
+			cf->flags = so->ll.flags;
 
 		skb->dev = dev;
 		skb->sk  = sk;
@@ -762,7 +762,7 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 	if (!dev)
 		return -ENXIO;
 
-	skb = sock_alloc_send_skb(sk, so->pdu.mtu,
+	skb = sock_alloc_send_skb(sk, so->ll.mtu,
 				  msg->msg_flags & MSG_DONTWAIT, &err);
 	if (!skb) {
 		dev_put(dev);
@@ -774,15 +774,15 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 	so->tx.idx = 0;
 
 	cf = (struct canfd_frame *)skb->data;
-	skb_put(skb, so->pdu.mtu);
+	skb_put(skb, so->ll.mtu);
 
 	/* check for single frame transmission */
-	if (size <= so->pdu.lldl - N_PCI_SZ - ae) {
+	if (size <= so->ll.dl - N_PCI_SZ - ae) {
 
 		isotp_fill_dataframe(cf, so, ae);
 
 		/* place single frame N_PCI in appropriate index */
-		if (so->pdu.lldl == CAN_MAX_DLEN)
+		if (so->ll.dl == CAN_MAX_DLEN)
 			cf->data[ae] = size | N_PCI_SF;
 		else
 			cf->data[ae] = size | N_PCI_LSF0;
@@ -800,8 +800,8 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 	}
 
 	/* send the first or only CAN frame */
-	if (so->pdu.mtu == CANFD_MTU)
-		cf->flags = so->pdu.flags;
+	if (so->ll.mtu == CANFD_MTU)
+		cf->flags = so->ll.flags;
 
 	skb->dev = dev;
 	skb->sk  = sk;
@@ -1049,28 +1049,28 @@ static int isotp_setsockopt(struct socket *sock, int level, int optname,
 			return -EFAULT;
 		break;
 
-	case CAN_ISOTP_PDU_OPTS:
-		if (optlen != sizeof(struct can_isotp_pdu_options))
+	case CAN_ISOTP_LL_OPTS:
+		if (optlen != sizeof(struct can_isotp_ll_options))
 			return -EINVAL;
 		else {
-			struct can_isotp_pdu_options pdu;
+			struct can_isotp_ll_options ll;
 
-			if (copy_from_user(&pdu, optval, optlen))
+			if (copy_from_user(&ll, optval, optlen))
 				return -EFAULT;
 
-			if (pdu.lldl != 8 && pdu.lldl != 12 &&
-			    pdu.lldl != 16 && pdu.lldl != 20 &&
-			    pdu.lldl != 24 && pdu.lldl != 32 &&
-			    pdu.lldl != 48 && pdu.lldl != 64)
+			if (ll.dl != 8 && ll.dl != 12 &&
+			    ll.dl != 16 && ll.dl != 20 &&
+			    ll.dl != 24 && ll.dl != 32 &&
+			    ll.dl != 48 && ll.dl != 64)
 				return -EINVAL;
 
-			if (pdu.mtu != CAN_MTU && pdu.mtu != CANFD_MTU) 
+			if (ll.mtu != CAN_MTU && ll.mtu != CANFD_MTU) 
 				return -EINVAL;
 
-			if (pdu.mtu == CAN_MTU && pdu.lldl > CAN_MAX_DLEN) 
+			if (ll.mtu == CAN_MTU && ll.dl > CAN_MAX_DLEN) 
 				return -EINVAL;
 
-			memcpy(&so->pdu, &pdu, sizeof(pdu));
+			memcpy(&so->ll, &ll, sizeof(ll));
 		}
 		break;
 
@@ -1118,9 +1118,9 @@ static int isotp_getsockopt(struct socket *sock, int level, int optname,
 		val = &so->force_rx_stmin;
 		break;
 
-	case CAN_ISOTP_PDU_OPTS:
-		len = min_t(int, len, sizeof(struct can_isotp_pdu_options));
-		val = &so->pdu;
+	case CAN_ISOTP_LL_OPTS:
+		len = min_t(int, len, sizeof(struct can_isotp_ll_options));
+		val = &so->ll;
 		break;
 
 	default:
@@ -1200,9 +1200,9 @@ static int isotp_init(struct sock *sk)
 	so->rxfc.bs		= CAN_ISOTP_DEFAULT_RECV_BS;
 	so->rxfc.stmin		= CAN_ISOTP_DEFAULT_RECV_STMIN;
 	so->rxfc.wftmax		= CAN_ISOTP_DEFAULT_RECV_WFTMAX;
-	so->pdu.lldl		= CAN_ISOTP_DEFAULT_PDU_LLDL;
-	so->pdu.mtu		= CAN_ISOTP_DEFAULT_PDU_MTU;
-	so->pdu.flags		= CAN_ISOTP_DEFAULT_PDU_FLAGS;
+	so->ll.dl		= CAN_ISOTP_DEFAULT_LL_DL;
+	so->ll.mtu		= CAN_ISOTP_DEFAULT_LL_MTU;
+	so->ll.flags		= CAN_ISOTP_DEFAULT_LL_FLAGS;
 
 	so->rx.state = ISOTP_IDLE;
 	so->tx.state = ISOTP_IDLE;

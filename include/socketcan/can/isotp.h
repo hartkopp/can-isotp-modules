@@ -36,7 +36,7 @@
 					/* ignore received CF frames which */
 					/* timestamps differ less than val */
 
-#define CAN_ISOTP_PDU_OPTS	5	/* pass struct can_isotp_pdu_options */
+#define CAN_ISOTP_LL_OPTS	5	/* pass struct can_isotp_ll_options */
 
 struct can_isotp_options {
 
@@ -72,9 +72,9 @@ struct can_isotp_fc_options {
 				/* __u8 value : 0 = omit FC N_PDU WT	*/
 };
 
-struct can_isotp_pdu_options {
+struct can_isotp_ll_options {
 
-	__u8  lldl;		/* link layer data length in bytes	*/
+	__u8  dl;		/* link layer data length in bytes	*/
 				/* (configured maximum payload length)	*/
 				/* __u8 value : 8,12,16,20,24,32,48,64	*/
 
@@ -111,9 +111,9 @@ struct can_isotp_pdu_options {
 #define CAN_ISOTP_DEFAULT_RECV_BS	0
 #define CAN_ISOTP_DEFAULT_RECV_STMIN	0x00
 #define CAN_ISOTP_DEFAULT_RECV_WFTMAX	0
-#define CAN_ISOTP_DEFAULT_PDU_LLDL	CAN_MAX_DLEN
-#define CAN_ISOTP_DEFAULT_PDU_MTU	CAN_MTU
-#define CAN_ISOTP_DEFAULT_PDU_FLAGS	0
+#define CAN_ISOTP_DEFAULT_LL_DL		CAN_MAX_DLEN
+#define CAN_ISOTP_DEFAULT_LL_MTU	CAN_MTU
+#define CAN_ISOTP_DEFAULT_LL_FLAGS	0
 
 /*
  * Remark on CAN_ISOTP_DEFAULT_RECV_* values:
