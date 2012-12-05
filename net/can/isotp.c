@@ -104,6 +104,11 @@ MODULE_ALIAS("can-proto-6");
 #define N_PCI_FF 0x10	/* first frame */
 #define N_PCI_CF 0x20	/* consecutive frame */
 #define N_PCI_FC 0x30	/* flow control */
+#define N_PCI_LSF0 0x40	/* long single frame LSF_DL & 30 = 0x00 (base) */
+#define N_PCI_LSF1 0x50	/* long single frame LSF_DL & 30 = 0x10 */
+#define N_PCI_LSF2 0x60	/* long single frame LSF_DL & 30 = 0x20 */
+#define N_PCI_LSF3 0x70	/* long single frame LSF_DL & 30 = 0x30 */
+#define N_PCI_SZ 1	/* size of the PCI byte #1 */
 
 /* Flow Status given in FC frame */
 #define ISOTP_FC_CTS	0	/* clear to send */
@@ -244,18 +249,36 @@ static void isotp_rcv_skb(struct sk_buff *skb, struct sock *sk)
 		kfree_skb(skb);
 }
 
+static u8 padlen(u8 datalen)
+{
+	const u8 plen[] = {8,  8,  8,  8,  8,  8,  8,  8,  8,	/* 0 - 8 */
+			   12, 12, 12, 12,			/* 9 - 12 */
+			   16, 16, 16, 16,			/* 13 - 16 */
+			   20, 20, 20, 20,			/* 17 - 20 */
+			   24, 24, 24, 24,			/* 21 - 24 */
+			   32, 32, 32, 32, 32, 32, 32, 32,	/* 25 - 32 */
+			   48, 48, 48, 48, 48, 48, 48, 48,	/* 33 - 40 */
+			   48, 48, 48, 48, 48, 48, 48, 48};	/* 41 - 48 */
+
+	if (datalen > 48)
+		return 64;
+
+	return plen[datalen];
+}
+
 static int check_pad(struct isotp_sock *so, struct canfd_frame *cf,
 		     int start_index, __u8 content)
 {
 	int i;
 
-	/* check datalength code */
-	if ((so->opt.flags & CAN_ISOTP_CHK_PAD_LEN) && cf->len != 8)
+	/* check datalength of correctly padded CAN frame */
+	if ((so->opt.flags & CAN_ISOTP_CHK_PAD_LEN) &&
+	    cf->len != padlen(cf->len))
 			return 1;
 
 	/* check padding content */
 	if (so->opt.flags & CAN_ISOTP_CHK_PAD_DATA) {
-		for (i = start_index; i < 8; i++)
+		for (i = start_index; i < cf->len; i++)
 			if (cf->data[i] != content)
 				return 1;
 	}
@@ -342,24 +365,31 @@ static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
 			struct sk_buff *skb)
 {
 	struct isotp_sock *so = isotp_sk(sk);
-	int len = cf->data[ae] & 0x0F;
+	int len;
 	struct sk_buff *nskb;
+
+	/* SF PDU or LSF PDU ? */
+	if (so->pdu.lldl == CAN_MAX_DLEN)
+		len = cf->data[ae] & 0x0F;
+	else
+		len = cf->data[ae] & 0x3F;
 
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
 
-	if (!len || len > 7 || (ae && len > 6))
+	if (!len || len > so->pdu.lldl - N_PCI_SZ ||
+	    (ae && len > so->pdu.lldl - N_PCI_SZ - 1))
 		return 1;
 
 	if ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
-	    check_pad(so, cf, 1+ae+len, so->opt.rxpad_content))
+	    check_pad(so, cf, N_PCI_SZ + ae + len, so->opt.rxpad_content))
 		return 1;
 
 	nskb = alloc_skb(len, gfp_any());
 	if (!nskb)
 		return 1;
 
-	memcpy(skb_put(nskb, len), &cf->data[1+ae], len);
+	memcpy(skb_put(nskb, len), &cf->data[N_PCI_SZ + ae], len);
 
 	nskb->tstamp = skb->tstamp;
 	nskb->dev = skb->dev;
@@ -375,18 +405,18 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
 
-	if (cf->len != 8)
+	if (cf->len != so->pdu.lldl)
 		return 1;
 
 	so->rx.len = (cf->data[ae] & 0x0F) << 8;
-	so->rx.len += cf->data[ae+1];
+	so->rx.len += cf->data[ae + 1];
 
-	if (so->rx.len + ae < 8)
+	if (so->rx.len + ae < so->pdu.lldl)
 		return 1;
 
 	/* copy the first received data bytes */
 	so->rx.idx = 0;
-	for (i = ae+2; i < 8; i++)
+	for (i = ae+2; i < so->pdu.lldl; i++)
 		so->rx.buf[so->rx.idx++] = cf->data[i];
 
 	/* initial setup for this pdu receiption */
@@ -525,13 +555,22 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 		/* rx path: consecutive frame */
 		isotp_rcv_cf(sk, cf, ae, skb);
 		break;
+
+	case N_PCI_LSF0:
+	case N_PCI_LSF1:
+	case N_PCI_LSF2:
+	case N_PCI_LSF3:
+		/* rx path: long single frame */
+		if (skb->len == CANFD_MTU)
+			isotp_rcv_sf(sk, cf, ae, skb);
+		break;
 	}
 }
 
 static void isotp_fill_dataframe(struct canfd_frame *cf, struct isotp_sock *so,
 				 int ae)
 {
-	unsigned char space = 7 - ae;
+	unsigned char space = so->pdu.lldl - N_PCI_SZ - ae;
 	int num = min_t(int, so->tx.len - so->tx.idx, space);
 	int i;
 
@@ -539,15 +578,15 @@ static void isotp_fill_dataframe(struct canfd_frame *cf, struct isotp_sock *so,
 
 	if (so->opt.flags & CAN_ISOTP_TX_PADDING) {
 		if (num < space)
-			memset(cf->data, so->opt.txpad_content, 8);
+			memset(cf->data, so->opt.txpad_content, so->pdu.lldl);
 
-		cf->len = 8;
+		cf->len = padlen(cf->len);
 	} else
-		cf->len = num + 1 + ae;
+		cf->len = num + N_PCI_SZ + ae;
 
 
 	for (i = 0; i < num; i++)
-		cf->data[i+ae+1] = so->tx.buf[so->tx.idx++];
+		cf->data[i + ae + 1] = so->tx.buf[so->tx.idx++];
 
 	if (ae)
 		cf->data[0] = so->opt.ext_address;
@@ -559,16 +598,16 @@ static void isotp_create_fframe(struct canfd_frame *cf, struct isotp_sock *so,
 	int i;
 
 	cf->can_id = so->txid;
-	cf->len = 8;
+	cf->len = so->pdu.lldl;
 	if (ae)
 		cf->data[0] = so->opt.ext_address;
 
 	/* N_PCI bytes with FF_DL data length */
 	cf->data[ae] = (u8) (so->tx.len>>8) | N_PCI_FF;
-	cf->data[ae+1] = (u8) so->tx.len & 0xFFU;
+	cf->data[ae + 1] = (u8) so->tx.len & 0xFFU;
 
-	/* add first 5 or 6 data bytes depending on ae */
-	for (i = ae+2; i < 8; i++)
+	/* add first data bytes depending on ae */
+	for (i = ae + 2; i < so->pdu.lldl; i++)
 		cf->data[i] = so->tx.buf[so->tx.idx++];
 
 	so->tx.sn = 1;
@@ -733,12 +772,15 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 	skb_put(skb, so->pdu.mtu);
 
 	/* check for single frame transmission */
-	if (size <= 7 - ae) {
+	if (size <= so->pdu.lldl - N_PCI_SZ - ae) {
 
 		isotp_fill_dataframe(cf, so, ae);
 
 		/* place single frame N_PCI in appropriate index */
-		cf->data[ae] = size | N_PCI_SF;
+		if (so->pdu.lldl == CAN_MAX_DLEN)
+			cf->data[ae] = size | N_PCI_SF;
+		else
+			cf->data[ae] = size | N_PCI_LSF0;
 
 		so->tx.state = ISOTP_IDLE;
 		wake_up_interruptible(&so->wait);
