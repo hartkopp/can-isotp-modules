@@ -575,15 +575,20 @@ static void isotp_fill_dataframe(struct canfd_frame *cf, struct isotp_sock *so,
 	int i;
 
 	cf->can_id = so->txid;
+	cf->len = num + N_PCI_SZ + ae;
 
-	if (so->opt.flags & CAN_ISOTP_TX_PADDING) {
-		if (num < space)
-			memset(cf->data, so->opt.txpad_content, so->pdu.lldl);
-
-		cf->len = padlen(cf->len);
-	} else
-		cf->len = num + N_PCI_SZ + ae;
-
+	if (num < space) {
+		if (so->opt.flags & CAN_ISOTP_TX_PADDING) {
+			/* user requested padding */
+			cf->len = padlen(cf->len);
+			memset(cf->data, so->opt.txpad_content, cf->len);
+		} else if (cf->len > CAN_MAX_DLEN) {
+			/* mandatory padding for CAN FD frames */ 
+			cf->len = padlen(cf->len);
+			memset(cf->data, CAN_ISOTP_DEFAULT_TXPAD_CONTENT,
+			       cf->len);
+		}
+	}
 
 	for (i = 0; i < num; i++)
 		cf->data[i + ae + 1] = so->tx.buf[so->tx.idx++];
