@@ -1058,10 +1058,8 @@ static int isotp_setsockopt(struct socket *sock, int level, int optname,
 			if (copy_from_user(&ll, optval, optlen))
 				return -EFAULT;
 
-			if (ll.dl != 8 && ll.dl != 12 &&
-			    ll.dl != 16 && ll.dl != 20 &&
-			    ll.dl != 24 && ll.dl != 32 &&
-			    ll.dl != 48 && ll.dl != 64)
+			/* check for correct ISO 11898-7 DLC data lentgh */
+			if (ll.dl != padlen(ll.dl))
 				return -EINVAL;
 
 			if (ll.mtu != CAN_MTU && ll.mtu != CANFD_MTU) 
