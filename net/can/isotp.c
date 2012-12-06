@@ -939,6 +939,11 @@ static int isotp_bind(struct socket *sock, struct sockaddr *uaddr, int len)
 		err = -ENODEV;
 		goto out;
 	}
+	if (dev->mtu < so->ll.mtu) {
+		dev_put(dev);
+		err = -EINVAL;
+		goto out;
+	}
 	if (!(dev->flags & IFF_UP))
 		notify_enetdown = 1;
 
