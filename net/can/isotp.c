@@ -100,14 +100,16 @@ MODULE_ALIAS("can-proto-6");
 			 (CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG))
 
 /* N_PCI type values in bits 7-4 of N_PCI bytes */
-#define N_PCI_SF 0x00	/* single frame */
-#define N_PCI_FF 0x10	/* first frame */
-#define N_PCI_CF 0x20	/* consecutive frame */
-#define N_PCI_FC 0x30	/* flow control */
-#define N_PCI_LSF0 0x40	/* long single frame LSF_DL & 30 = 0x00 (base) */
-#define N_PCI_LSF1 0x50	/* long single frame LSF_DL & 30 = 0x10 */
-#define N_PCI_LSF2 0x60	/* long single frame LSF_DL & 30 = 0x20 */
-#define N_PCI_LSF3 0x70	/* long single frame LSF_DL & 30 = 0x30 */
+#define N_PCI_SF8	0x00 /* single frame for LL_DL == 8 */
+#define N_PCI_FF	0x10 /* first frame */
+#define N_PCI_CF	0x20 /* consecutive frame */
+#define N_PCI_FC	0x30 /* flow control */
+#define N_PCI_SFX	0x40 /* single frame for LL_DL > 8 (base value) */
+#define N_PCI_SFX_00	(N_PCI_SFX + 0x00) /* single frame 0b0100 of 0b01xx */
+#define N_PCI_SFX_01	(N_PCI_SFX + 0x10) /* single frame 0b0101 of 0b01xx */
+#define N_PCI_SFX_10	(N_PCI_SFX + 0x20) /* single frame 0b0110 of 0b01xx */
+#define N_PCI_SFX_11	(N_PCI_SFX + 0x30) /* single frame 0b0111 of 0b01xx */
+
 #define N_PCI_SZ 1	/* size of the PCI byte #1 */
 
 /* Flow Status given in FC frame */
@@ -362,20 +364,13 @@ static int isotp_rcv_fc(struct isotp_sock *so, struct canfd_frame *cf, int ae)
 }
 
 static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
-			struct sk_buff *skb)
+			struct sk_buff *skb, int len)
 {
 	struct isotp_sock *so = isotp_sk(sk);
-	int len;
 	struct sk_buff *nskb;
 
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
-
-	/* SF PDU or LSF PDU ? */
-	if (so->ll.dl == CAN_MAX_DLEN)
-		len = cf->data[ae] & 0x0F;
-	else
-		len = cf->data[ae] & 0x3F;
 
 	if (!len || len > so->ll.dl - N_PCI_SZ ||
 	    (ae && len > so->ll.dl - N_PCI_SZ - 1))
@@ -541,9 +536,19 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 		isotp_rcv_fc(so, cf, ae);
 		break;
 
-	case N_PCI_SF:
-		/* rx path: single frame */
-		isotp_rcv_sf(sk, cf, ae, skb);
+	case N_PCI_SF8:
+		/* rx path: single frame with LL_DL == 8 */
+		if (so->ll.dl == CAN_MAX_DLEN)
+			isotp_rcv_sf(sk, cf, ae, skb, cf->data[ae] & 0x0F);
+		break;
+
+	case N_PCI_SFX_00:
+	case N_PCI_SFX_01:
+	case N_PCI_SFX_10:
+	case N_PCI_SFX_11:
+		/* rx path: single frame with LL_DL > 8 */
+		if (skb->len == CANFD_MTU && so->ll.dl > CAN_MAX_DLEN)
+			isotp_rcv_sf(sk, cf, ae, skb, cf->data[ae] & 0x3F);
 		break;
 
 	case N_PCI_FF:
@@ -556,14 +561,6 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 		isotp_rcv_cf(sk, cf, ae, skb);
 		break;
 
-	case N_PCI_LSF0:
-	case N_PCI_LSF1:
-	case N_PCI_LSF2:
-	case N_PCI_LSF3:
-		/* rx path: long single frame */
-		if (skb->len == CANFD_MTU)
-			isotp_rcv_sf(sk, cf, ae, skb);
-		break;
 	}
 }
 
@@ -783,9 +780,9 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 
 		/* place single frame N_PCI in appropriate index */
 		if (so->ll.dl == CAN_MAX_DLEN)
-			cf->data[ae] = size | N_PCI_SF;
+			cf->data[ae] = size | N_PCI_SF8;
 		else
-			cf->data[ae] = size | N_PCI_LSF0;
+			cf->data[ae] = size | N_PCI_SFX;
 
 		so->tx.state = ISOTP_IDLE;
 		wake_up_interruptible(&so->wait);
