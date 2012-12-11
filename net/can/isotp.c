@@ -206,8 +206,8 @@ static int isotp_send_fc(struct sock *sk, int ae)
 	ncf->can_id = so->txid;
 
 	if (so->opt.flags & CAN_ISOTP_RX_PADDING) {
-		memset(ncf->data, so->opt.rxpad_content, 8);
-		ncf->len = 8;
+		memset(ncf->data, so->opt.rxpad_content, CAN_MAX_DLEN);
+		ncf->len = CAN_MAX_DLEN;
 	} else
 		ncf->len = ae+3;
 
