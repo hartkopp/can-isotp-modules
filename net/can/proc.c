@@ -208,9 +208,15 @@ static void can_print_rcvlist(struct seq_file *m, struct hlist_head *rx_list,
 			      struct net_device *dev)
 {
 	struct receiver *r;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	struct hlist_node *n;
+#endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(r, n, rx_list, list) {
+#else
+	hlist_for_each_entry_rcu(r, rx_list, list) {
+#endif
 		char *fmt = (r->can_id & CAN_EFF_FLAG)?
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,0,0)
 			"   %-5s  %08x  %08x  %p  %p  %8ld  %s\n" :
@@ -361,12 +367,18 @@ static int can_rcvlist_proc_show(struct seq_file *m, void *v)
 	/* double cast to prevent GCC warning */
 	int idx = (int)(long)m->private;
 	struct dev_rcv_lists *d;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	struct hlist_node *n;
+#endif
 
 	seq_printf(m, "\nreceive list '%s':\n", rx_list_name[idx]);
 
 	rcu_read_lock();
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(d, n, &can_rx_dev_list, list) {
+#else
+	hlist_for_each_entry_rcu(d, &can_rx_dev_list, list) {
+#endif
 
 		if (!hlist_empty(&d->rx[idx])) {
 			can_print_recv_banner(m);
@@ -396,13 +408,19 @@ static const struct file_operations can_rcvlist_proc_fops = {
 static int can_rcvlist_sff_proc_show(struct seq_file *m, void *v)
 {
 	struct dev_rcv_lists *d;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	struct hlist_node *n;
+#endif
 
 	/* RX_SFF */
 	seq_puts(m, "\nreceive list 'rx_sff':\n");
 
 	rcu_read_lock();
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(d, n, &can_rx_dev_list, list) {
+#else
+	hlist_for_each_entry_rcu(d, &can_rx_dev_list, list) {
+#endif
 		int i, all_empty = 1;
 		/* check wether at least one list is non-empty */
 		for (i = 0; i < 0x800; i++)
@@ -444,9 +462,15 @@ static int can_print_rcvlist(char *page, int len, struct hlist_head *rx_list,
 			     struct net_device *dev)
 {
 	struct receiver *r;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	struct hlist_node *n;
+#endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(r, n, rx_list, list) {
+#else
+	hlist_for_each_entry_rcu(r, rx_list, list) {
+#endif
 		char *fmt = (r->can_id & CAN_EFF_FLAG)?
 			"   %-5s  %08X  %08x  %08x  %08x  %8ld  %s\n" :
 			"   %-5s     %03X    %08x  %08lx  %08lx  %8ld  %s\n";
@@ -606,13 +630,19 @@ static int can_proc_read_rcvlist(char *page, char **start, off_t off,
 	int idx = (int)(long)data;
 	int len = 0;
 	struct dev_rcv_lists *d;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	struct hlist_node *n;
+#endif
 
 	len += snprintf(page + len, PAGE_SIZE - len,
 			"\nreceive list '%s':\n", rx_list_name[idx]);
 
 	rcu_read_lock();
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(d, n, &can_rx_dev_list, list) {
+#else
+	hlist_for_each_entry_rcu(d, &can_rx_dev_list, list) {
+#endif
 
 		if (!hlist_empty(&d->rx[idx])) {
 			len = can_print_recv_banner(page, len);
@@ -638,14 +668,20 @@ static int can_proc_read_rcvlist_sff(char *page, char **start, off_t off,
 {
 	int len = 0;
 	struct dev_rcv_lists *d;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	struct hlist_node *n;
+#endif
 
 	/* RX_SFF */
 	len += snprintf(page + len, PAGE_SIZE - len,
 			"\nreceive list 'rx_sff':\n");
 
 	rcu_read_lock();
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(d, n, &can_rx_dev_list, list) {
+#else
+	hlist_for_each_entry_rcu(d, &can_rx_dev_list, list) {
+#endif
 		int i, all_empty = 1;
 		/* check wether at least one list is non-empty */
 		for (i = 0; i < 0x800; i++)

@@ -631,7 +631,9 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 {
 	struct receiver *r = NULL;
 	struct hlist_head *rl;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	struct hlist_node *next;
+#endif
 	struct dev_rcv_lists *d;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
@@ -657,7 +659,11 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 	 * been registered before.
 	 */
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(r, next, rl, list) {
+#else
+	hlist_for_each_entry_rcu(r, rl, list) {
+#endif
 		if (r->can_id == can_id && r->mask == mask
 		    && r->func == func && r->data == data)
 			break;
@@ -669,7 +675,11 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 	 * will be NULL, while r will point to the last item of the list.
 	 */
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	if (!next) {
+#else
+	if (!r) {
+#endif
 		printk(KERN_ERR "BUG: receive list entry not found for "
 		       "dev %s, id %03X, mask %03X\n",
 		       DNAME(dev), can_id, mask);
@@ -715,7 +725,9 @@ static inline void deliver(struct sk_buff *skb, struct receiver *r)
 static int can_rcv_filter(struct dev_rcv_lists *d, struct sk_buff *skb)
 {
 	struct receiver *r;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	struct hlist_node *n;
+#endif
 	int matches = 0;
 	struct can_frame *cf = (struct can_frame *)skb->data;
 	canid_t can_id = cf->can_id;
@@ -725,7 +737,11 @@ static int can_rcv_filter(struct dev_rcv_lists *d, struct sk_buff *skb)
 
 	if (can_id & CAN_ERR_FLAG) {
 		/* check for error frame entries only */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 		hlist_for_each_entry_rcu(r, n, &d->rx[RX_ERR], list) {
+#else
+		hlist_for_each_entry_rcu(r, &d->rx[RX_ERR], list) {
+#endif
 			if (can_id & r->mask) {
 				deliver(skb, r);
 				matches++;
@@ -735,13 +751,21 @@ static int can_rcv_filter(struct dev_rcv_lists *d, struct sk_buff *skb)
 	}
 
 	/* check for unfiltered entries */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(r, n, &d->rx[RX_ALL], list) {
+#else
+	hlist_for_each_entry_rcu(r, &d->rx[RX_ALL], list) {
+#endif
 		deliver(skb, r);
 		matches++;
 	}
 
 	/* check for can_id/mask entries */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(r, n, &d->rx[RX_FIL], list) {
+#else
+	hlist_for_each_entry_rcu(r, &d->rx[RX_FIL], list) {
+#endif
 		if ((can_id & r->mask) == r->can_id) {
 			deliver(skb, r);
 			matches++;
@@ -749,7 +773,11 @@ static int can_rcv_filter(struct dev_rcv_lists *d, struct sk_buff *skb)
 	}
 
 	/* check for inverted can_id/mask entries */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_rcu(r, n, &d->rx[RX_INV], list) {
+#else
+	hlist_for_each_entry_rcu(r, &d->rx[RX_INV], list) {
+#endif
 		if ((can_id & r->mask) != r->can_id) {
 			deliver(skb, r);
 			matches++;
@@ -761,7 +789,11 @@ static int can_rcv_filter(struct dev_rcv_lists *d, struct sk_buff *skb)
 		return matches;
 
 	if (can_id & CAN_EFF_FLAG) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 		hlist_for_each_entry_rcu(r, n, &d->rx[RX_EFF], list) {
+#else
+		hlist_for_each_entry_rcu(r, &d->rx[RX_EFF], list) {
+#endif
 			if (r->can_id == can_id) {
 				deliver(skb, r);
 				matches++;
@@ -769,7 +801,11 @@ static int can_rcv_filter(struct dev_rcv_lists *d, struct sk_buff *skb)
 		}
 	} else {
 		can_id &= CAN_SFF_MASK;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 		hlist_for_each_entry_rcu(r, n, &d->rx_sff[can_id], list) {
+#else
+		hlist_for_each_entry_rcu(r, &d->rx_sff[can_id], list) {
+#endif
 			deliver(skb, r);
 			matches++;
 		}
@@ -1070,7 +1106,10 @@ static __init int can_init(void)
 static __exit void can_exit(void)
 {
 	struct dev_rcv_lists *d;
-	struct hlist_node *n, *next;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
+	struct hlist_node *n;
+#endif
+	struct hlist_node *next;
 
 	if (stats_timer)
 		del_timer(&can_stattimer);
@@ -1085,7 +1124,11 @@ static __exit void can_exit(void)
 	/* remove can_rx_dev_list */
 	spin_lock(&can_rcvlists_lock);
 	hlist_del(&can_rx_alldev_list.list);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	hlist_for_each_entry_safe(d, n, next, &can_rx_dev_list, list) {
+#else
+	hlist_for_each_entry_safe(d, next, &can_rx_dev_list, list) {
+#endif
 		hlist_del(&d->list);
 		BUG_ON(d->entries);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
