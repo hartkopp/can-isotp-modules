@@ -1782,7 +1782,7 @@ static void __exit bcm_module_exit(void)
 
 	if (proc_dir)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
-		proc_net_remove(&init_net, "can-bcm");
+		remove_proc_entry("can-bcm", init_net.proc_net);
 #else
 		proc_net_remove("can-bcm");
 #endif
