@@ -582,7 +582,7 @@ static void isotp_fill_dataframe(struct canfd_frame *cf, struct isotp_sock *so,
 		} else if (cf->len > CAN_MAX_DLEN) {
 			/* mandatory padding for CAN FD frames */ 
 			cf->len = padlen(cf->len);
-			memset(cf->data, CAN_ISOTP_DEFAULT_TXPAD_CONTENT,
+			memset(cf->data, CAN_ISOTP_DEFAULT_PAD_CONTENT,
 			       cf->len);
 		}
 	}
@@ -1194,8 +1194,8 @@ static int isotp_init(struct sock *sk)
 
 	so->opt.flags		= CAN_ISOTP_DEFAULT_FLAGS;
 	so->opt.ext_address	= CAN_ISOTP_DEFAULT_EXT_ADDRESS;
-	so->opt.rxpad_content	= CAN_ISOTP_DEFAULT_RXPAD_CONTENT;
-	so->opt.txpad_content	= CAN_ISOTP_DEFAULT_TXPAD_CONTENT;
+	so->opt.rxpad_content	= CAN_ISOTP_DEFAULT_PAD_CONTENT;
+	so->opt.txpad_content	= CAN_ISOTP_DEFAULT_PAD_CONTENT;
 	so->opt.frame_txtime	= CAN_ISOTP_DEFAULT_FRAME_TXTIME;
 	so->rxfc.bs		= CAN_ISOTP_DEFAULT_RECV_BS;
 	so->rxfc.stmin		= CAN_ISOTP_DEFAULT_RECV_STMIN;

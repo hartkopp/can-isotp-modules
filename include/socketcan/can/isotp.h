@@ -105,8 +105,7 @@ struct can_isotp_ll_options {
 
 #define CAN_ISOTP_DEFAULT_FLAGS		0
 #define CAN_ISOTP_DEFAULT_EXT_ADDRESS	0x00
-#define CAN_ISOTP_DEFAULT_RXPAD_CONTENT	0x55 /* prevent bit-stuffing */
-#define CAN_ISOTP_DEFAULT_TXPAD_CONTENT	0xAA /* prevent bit-stuffing */
+#define CAN_ISOTP_DEFAULT_PAD_CONTENT	0xCC /* prevent bit-stuffing */
 #define CAN_ISOTP_DEFAULT_FRAME_TXTIME	0
 #define CAN_ISOTP_DEFAULT_RECV_BS	0
 #define CAN_ISOTP_DEFAULT_RECV_STMIN	0x00
