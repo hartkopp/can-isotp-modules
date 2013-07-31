@@ -131,6 +131,7 @@ struct tpcon {
 	u8  state;
 	u8  bs;
 	u8  sn;
+	u8  ll_dl;
 	u8  buf[4096];
 };
  
@@ -574,7 +575,7 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 static void isotp_fill_dataframe(struct canfd_frame *cf, struct isotp_sock *so,
 				 int ae)
 {
-	unsigned char space = so->ll.dl - N_PCI_SZ - ae;
+	unsigned char space = so->tx.ll_dl - N_PCI_SZ - ae;
 	int num = min_t(int, so->tx.len - so->tx.idx, space);
 	int i;
 
@@ -607,7 +608,7 @@ static void isotp_create_fframe(struct canfd_frame *cf, struct isotp_sock *so,
 	int i;
 
 	cf->can_id = so->txid;
-	cf->len = so->ll.dl;
+	cf->len = so->tx.ll_dl;
 	if (ae)
 		cf->data[0] = so->opt.ext_address;
 
@@ -616,7 +617,7 @@ static void isotp_create_fframe(struct canfd_frame *cf, struct isotp_sock *so,
 	cf->data[ae + 1] = (u8) so->tx.len & 0xFFU;
 
 	/* add first data bytes depending on ae */
-	for (i = ae + 2; i < so->ll.dl; i++)
+	for (i = ae + 2; i < so->tx.ll_dl; i++)
 		cf->data[i] = so->tx.buf[so->tx.idx++];
 
 	so->tx.sn = 1;
@@ -781,12 +782,12 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 	skb_put(skb, so->ll.mtu);
 
 	/* check for single frame transmission */
-	if (size <= so->ll.dl - N_PCI_SZ - ae) {
+	if (size <= so->tx.ll_dl - N_PCI_SZ - ae) {
 
 		isotp_fill_dataframe(cf, so, ae);
 
 		/* place single frame N_PCI in appropriate index */
-		if (so->ll.dl == CAN_MAX_DLEN)
+		if (so->tx.ll_dl == CAN_MAX_DLEN)
 			cf->data[ae] = size | N_PCI_SF8;
 		else
 			cf->data[ae] = size | N_PCI_SFX;
@@ -1078,6 +1079,9 @@ static int isotp_setsockopt(struct socket *sock, int level, int optname,
 				return -EINVAL;
 
 			memcpy(&so->ll, &ll, sizeof(ll));
+
+			/* set ll_dl for tx path */
+			so->tx.ll_dl = ll.dl;
 		}
 		break;
 
@@ -1207,7 +1211,7 @@ static int isotp_init(struct sock *sk)
 	so->rxfc.bs		= CAN_ISOTP_DEFAULT_RECV_BS;
 	so->rxfc.stmin		= CAN_ISOTP_DEFAULT_RECV_STMIN;
 	so->rxfc.wftmax		= CAN_ISOTP_DEFAULT_RECV_WFTMAX;
-	so->ll.dl		= CAN_ISOTP_DEFAULT_LL_DL;
+	so->tx.ll_dl		= CAN_ISOTP_DEFAULT_TX_LL_DL;
 	so->ll.mtu		= CAN_ISOTP_DEFAULT_LL_MTU;
 	so->ll.flags		= CAN_ISOTP_DEFAULT_LL_FLAGS;
 
