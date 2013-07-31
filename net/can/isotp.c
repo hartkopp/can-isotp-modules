@@ -457,6 +457,17 @@ static int isotp_rcv_cf(struct sock *sk, struct canfd_frame *cf, int ae,
 
 	hrtimer_cancel(&so->rxtimer);
 
+	/* CFs are never longer than the FF */
+	if (cf->len > so->rx.ll_dl)
+		return 1;
+
+	/* CFs have usually the LL_DL length */
+	if (cf->len < so->rx.ll_dl) {
+		/* this is only allowed for the last CF */
+		if (so->rx.len - so->rx.idx > so->rx.ll_dl - ae - N_PCI_SZ)
+			return 1;
+	}
+
 	if ((cf->data[ae] & 0x0F) != so->rx.sn) {
 		DBG("wrong sn %d. expected %d.\n",
 		    cf->data[ae] & 0x0F, so->rx.sn);
@@ -467,7 +478,7 @@ static int isotp_rcv_cf(struct sock *sk, struct canfd_frame *cf, int ae,
 	so->rx.sn++;
 	so->rx.sn %= 16;
 
-	for (i = ae+1; i < cf->len; i++) {
+	for (i = ae + N_PCI_SZ; i < cf->len; i++) {
 		so->rx.buf[so->rx.idx++] = cf->data[i];
 		if (so->rx.idx >= so->rx.len)
 			break;
