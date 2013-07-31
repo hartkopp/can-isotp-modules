@@ -210,11 +210,11 @@ static int isotp_send_fc(struct sock *sk, int ae)
 		memset(ncf->data, so->opt.rxpad_content, CAN_MAX_DLEN);
 		ncf->len = CAN_MAX_DLEN;
 	} else
-		ncf->len = ae+3;
+		ncf->len = ae + 3;
 
 	ncf->data[ae] = N_PCI_FC | ISOTP_FC_CTS;
-	ncf->data[ae+1] = so->rxfc.bs;
-	ncf->data[ae+2] = so->rxfc.stmin;
+	ncf->data[ae + 1] = so->rxfc.bs;
+	ncf->data[ae + 2] = so->rxfc.stmin;
 
 	if (ae)
 		ncf->data[0] = so->opt.ext_address;
@@ -297,7 +297,7 @@ static int isotp_rcv_fc(struct isotp_sock *so, struct canfd_frame *cf, int ae)
 	hrtimer_cancel(&so->txtimer);
 
 	if ((so->opt.flags & CAN_ISOTP_TX_PADDING) &&
-	    check_pad(so, cf, ae+3, so->opt.txpad_content)) {
+	    check_pad(so, cf, ae + 3, so->opt.txpad_content)) {
 		so->tx.state = ISOTP_IDLE;
 		wake_up_interruptible(&so->wait);
 		return 1;
@@ -306,8 +306,8 @@ static int isotp_rcv_fc(struct isotp_sock *so, struct canfd_frame *cf, int ae)
 	/* get communication parameters only from the first FC frame */
 	if (so->tx.state == ISOTP_WAIT_FIRST_FC) {
 
-		so->txfc.bs = cf->data[ae+1];
-		so->txfc.stmin = cf->data[ae+2];
+		so->txfc.bs = cf->data[ae + 1];
+		so->txfc.stmin = cf->data[ae + 2];
 
 		/* fix wrong STmin values according spec */
 		if ((so->txfc.stmin > 0x7F) && 
@@ -376,8 +376,7 @@ static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
 	/* get the used sender LL_DL from the CAN frame data length */
 	so->rx.ll_dl = padlen(cf->len);
 
-	if (!len || len > so->rx.ll_dl - N_PCI_SZ ||
-	    (ae && len > so->rx.ll_dl - N_PCI_SZ - 1))
+	if (!len || len > so->rx.ll_dl - N_PCI_SZ - ae)
 		return 1;
 
 	if ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
@@ -419,7 +418,7 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 
 	/* copy the first received data bytes */
 	so->rx.idx = 0;
-	for (i = ae+2; i < so->rx.ll_dl; i++)
+	for (i = ae + 2; i < so->rx.ll_dl; i++)
 		so->rx.buf[so->rx.idx++] = cf->data[i];
 
 	/* initial setup for this pdu receiption */
