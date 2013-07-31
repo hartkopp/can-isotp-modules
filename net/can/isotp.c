@@ -513,8 +513,15 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 	int ae = (so->opt.flags & CAN_ISOTP_EXTEND_ADDR)? 1:0;
 	u8 n_pci_type;
 
-	/* read CAN frame and free skbuff */
 	BUG_ON(skb->len != CAN_MTU && skb->len != CANFD_MTU);
+
+	/*
+	 * Strictly receive only frames with the configured MTU size
+	 * => clear separation of CAN2.0 / CAN FD transport channels
+	 */
+	if (skb->len != so->ll.mtu)
+		return;
+
 	cf = (struct canfd_frame *) skb->data;
 
 	/* if enabled: check receiption of my configured extended address */
