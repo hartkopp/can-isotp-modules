@@ -373,8 +373,11 @@ static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
 
-	if (!len || len > so->ll.dl - N_PCI_SZ ||
-	    (ae && len > so->ll.dl - N_PCI_SZ - 1))
+	/* get the used sender LL_DL from the CAN frame data length */
+	so->rx.ll_dl = padlen(cf->len);
+
+	if (!len || len > so->rx.ll_dl - N_PCI_SZ ||
+	    (ae && len > so->rx.ll_dl - N_PCI_SZ - 1))
 		return 1;
 
 	if ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
@@ -401,18 +404,22 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
 
-	if (cf->len != so->ll.dl)
+	/* get the used sender LL_DL from the (first) CAN frame data length */
+	so->rx.ll_dl = padlen(cf->len);
+
+	/* the first frame has to use the entire frame up to LL_DL length */
+	if (cf->len != so->rx.ll_dl)
 		return 1;
 
 	so->rx.len = (cf->data[ae] & 0x0F) << 8;
 	so->rx.len += cf->data[ae + 1];
 
-	if (so->rx.len + ae < so->ll.dl)
+	if (so->rx.len + ae < so->rx.ll_dl)
 		return 1;
 
 	/* copy the first received data bytes */
 	so->rx.idx = 0;
-	for (i = ae+2; i < so->ll.dl; i++)
+	for (i = ae+2; i < so->rx.ll_dl; i++)
 		so->rx.buf[so->rx.idx++] = cf->data[i];
 
 	/* initial setup for this pdu receiption */
@@ -545,8 +552,14 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 		break;
 
 	case N_PCI_SF8:
-		/* rx path: single frame with LL_DL == 8 */
-		if (so->ll.dl == CAN_MAX_DLEN)
+		/*
+		 * rx path: single frame with LL_DL == 8
+		 *
+		 * As we do not have a rx.ll_dl configuration, we can only test
+		 * if the CAN frames payload length matches the LL_DL == 8
+		 * requirements - no matter if it's CAN 2.0 or CAN FD
+		 */
+		if (cf->len <= CAN_MAX_DLEN)
 			isotp_rcv_sf(sk, cf, ae, skb, cf->data[ae] & 0x0F);
 		break;
 
@@ -554,8 +567,12 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 	case N_PCI_SFX_01:
 	case N_PCI_SFX_10:
 	case N_PCI_SFX_11:
-		/* rx path: single frame with LL_DL > 8 */
-		if (skb->len == CANFD_MTU && so->ll.dl > CAN_MAX_DLEN)
+		/*
+		 * rx path: single frame with LL_DL > 8
+		 *
+		 * Only CAN FD frames are allowed with these N_PCI values.
+		 */
+		if (skb->len == CANFD_MTU)
 			isotp_rcv_sf(sk, cf, ae, skb, cf->data[ae] & 0x3F);
 		break;
 
