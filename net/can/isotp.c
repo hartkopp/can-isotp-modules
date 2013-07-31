@@ -220,7 +220,7 @@ static int isotp_send_fc(struct sock *sk, int ae)
 		ncf->data[0] = so->opt.ext_address;
 
 	if (so->ll.mtu == CANFD_MTU)
-		ncf->flags = so->ll.flags;
+		ncf->flags = so->ll.tx_flags;
 
 	can_send(nskb, 1);
 	dev_put(dev);
@@ -710,7 +710,7 @@ isotp_tx_burst:
 		so->tx.bs++;
 
 		if (so->ll.mtu == CANFD_MTU)
-			cf->flags = so->ll.flags;
+			cf->flags = so->ll.tx_flags;
 
 		skb->dev = dev;
 		skb->sk  = sk;
@@ -834,7 +834,7 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 
 	/* send the first or only CAN frame */
 	if (so->ll.mtu == CANFD_MTU)
-		cf->flags = so->ll.flags;
+		cf->flags = so->ll.tx_flags;
 
 	skb->dev = dev;
 	skb->sk  = sk;
@@ -1096,20 +1096,20 @@ static int isotp_setsockopt(struct socket *sock, int level, int optname,
 			if (copy_from_user(&ll, optval, optlen))
 				return -EFAULT;
 
-			/* check for correct ISO 11898-7 DLC data lentgh */
-			if (ll.dl != padlen(ll.dl))
+			/* check for correct ISO 11898-1 DLC data lentgh */
+			if (ll.tx_dl != padlen(ll.tx_dl))
 				return -EINVAL;
 
 			if (ll.mtu != CAN_MTU && ll.mtu != CANFD_MTU) 
 				return -EINVAL;
 
-			if (ll.mtu == CAN_MTU && ll.dl > CAN_MAX_DLEN) 
+			if (ll.mtu == CAN_MTU && ll.tx_dl > CAN_MAX_DLEN) 
 				return -EINVAL;
 
 			memcpy(&so->ll, &ll, sizeof(ll));
 
-			/* set ll_dl for tx path */
-			so->tx.ll_dl = ll.dl;
+			/* set ll_dl for tx path to similar place as for rx */
+			so->tx.ll_dl = ll.tx_dl;
 		}
 		break;
 
@@ -1239,9 +1239,12 @@ static int isotp_init(struct sock *sk)
 	so->rxfc.bs		= CAN_ISOTP_DEFAULT_RECV_BS;
 	so->rxfc.stmin		= CAN_ISOTP_DEFAULT_RECV_STMIN;
 	so->rxfc.wftmax		= CAN_ISOTP_DEFAULT_RECV_WFTMAX;
-	so->tx.ll_dl		= CAN_ISOTP_DEFAULT_TX_LL_DL;
 	so->ll.mtu		= CAN_ISOTP_DEFAULT_LL_MTU;
-	so->ll.flags		= CAN_ISOTP_DEFAULT_LL_FLAGS;
+	so->ll.tx_dl		= CAN_ISOTP_DEFAULT_LL_TX_DL;
+	so->ll.tx_flags		= CAN_ISOTP_DEFAULT_LL_TX_FLAGS;
+
+	/* set ll_dl for tx path to similar place as for rx */
+	so->tx.ll_dl		= so->ll.tx_dl;
 
 	so->rx.state = ISOTP_IDLE;
 	so->tx.state = ISOTP_IDLE;

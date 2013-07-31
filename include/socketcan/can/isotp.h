@@ -74,17 +74,20 @@ struct can_isotp_fc_options {
 
 struct can_isotp_ll_options {
 
-	__u8  dl;		/* link layer data length in bytes	*/
-				/* (configured maximum payload length)	*/
-				/* __u8 value : 8,12,16,20,24,32,48,64	*/
-
-	__u8  mtu;		/* generated CAN frame type		*/
+	__u8  mtu;		/* generated & accepted CAN frame type	*/
 				/* __u8 value :				*/
 				/* CAN_MTU   (16) -> standard CAN 2.0	*/
 				/* CANFD_MTU (72) -> CAN FD frame	*/
 
-	__u8  flags;		/* set into struct canfd_frame.flags	*/
+	__u8  tx_dl;		/* tx link layer data length in bytes	*/
+				/* (configured maximum payload length)	*/
+				/* __u8 value : 8,12,16,20,24,32,48,64	*/
+				/* => rx path supports all LL_DL values */
+
+	__u8  tx_flags;		/* set into struct canfd_frame.flags	*/
 				/* at frame creation: e.g. CANFD_BRS	*/
+				/* Obsolete when the BRS flag is fixed	*/
+				/* by the CAN netdriver configuration	*/
 };
 
 
@@ -110,9 +113,10 @@ struct can_isotp_ll_options {
 #define CAN_ISOTP_DEFAULT_RECV_BS	0
 #define CAN_ISOTP_DEFAULT_RECV_STMIN	0x00
 #define CAN_ISOTP_DEFAULT_RECV_WFTMAX	0
-#define CAN_ISOTP_DEFAULT_TX_LL_DL	CAN_MAX_DLEN
+
 #define CAN_ISOTP_DEFAULT_LL_MTU	CAN_MTU
-#define CAN_ISOTP_DEFAULT_LL_FLAGS	0
+#define CAN_ISOTP_DEFAULT_LL_TX_DL	CAN_MAX_DLEN
+#define CAN_ISOTP_DEFAULT_LL_TX_FLAGS	0
 
 /*
  * Remark on CAN_ISOTP_DEFAULT_RECV_* values:
