@@ -373,10 +373,7 @@ static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
 
-	/* get the used sender LL_DL from the CAN frame data length */
-	so->rx.ll_dl = padlen(cf->len);
-
-	if (!len || len > so->rx.ll_dl - N_PCI_SZ - ae)
+	if (!len || len > cf->len - N_PCI_SZ - ae)
 		return 1;
 
 	if ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
