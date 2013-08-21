@@ -612,7 +612,7 @@ static void isotp_fill_dataframe(struct canfd_frame *cf, struct isotp_sock *so,
 			cf->len = padlen(cf->len);
 			memset(cf->data, so->opt.txpad_content, cf->len);
 		} else if (cf->len > CAN_MAX_DLEN) {
-			/* mandatory padding for CAN FD frames */ 
+			/* mandatory padding for CAN FD frames */
 			cf->len = padlen(cf->len);
 			memset(cf->data, CAN_ISOTP_DEFAULT_PAD_CONTENT,
 			       cf->len);
@@ -1096,10 +1096,10 @@ static int isotp_setsockopt(struct socket *sock, int level, int optname,
 			if (ll.tx_dl != padlen(ll.tx_dl))
 				return -EINVAL;
 
-			if (ll.mtu != CAN_MTU && ll.mtu != CANFD_MTU) 
+			if (ll.mtu != CAN_MTU && ll.mtu != CANFD_MTU)
 				return -EINVAL;
 
-			if (ll.mtu == CAN_MTU && ll.tx_dl > CAN_MAX_DLEN) 
+			if (ll.mtu == CAN_MTU && ll.tx_dl > CAN_MAX_DLEN)
 				return -EINVAL;
 
 			memcpy(&so->ll, &ll, sizeof(ll));
