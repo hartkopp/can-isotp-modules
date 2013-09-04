@@ -100,15 +100,10 @@ MODULE_ALIAS("can-proto-6");
 			 (CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG))
 
 /* N_PCI type values in bits 7-4 of N_PCI bytes */
-#define N_PCI_SF8	0x00 /* single frame for LL_DL == 8 */
+#define N_PCI_SF	0x00 /* single frame */
 #define N_PCI_FF	0x10 /* first frame */
 #define N_PCI_CF	0x20 /* consecutive frame */
 #define N_PCI_FC	0x30 /* flow control */
-#define N_PCI_SFX	0x40 /* single frame for LL_DL > 8 (base value) */
-#define N_PCI_SFX_00	(N_PCI_SFX + 0x00) /* single frame 0b0100 of 0b01xx */
-#define N_PCI_SFX_01	(N_PCI_SFX + 0x10) /* single frame 0b0101 of 0b01xx */
-#define N_PCI_SFX_10	(N_PCI_SFX + 0x20) /* single frame 0b0110 of 0b01xx */
-#define N_PCI_SFX_11	(N_PCI_SFX + 0x30) /* single frame 0b0111 of 0b01xx */
 
 #define N_PCI_SZ 1	/* size of the PCI byte #1 */
 #define FF_PCI_SZ 2	/* size of the FirstFrame PCI including the FF_DL */
@@ -366,7 +361,7 @@ static int isotp_rcv_fc(struct isotp_sock *so, struct canfd_frame *cf, int ae)
 }
 
 static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
-			struct sk_buff *skb, int len)
+			int esc, struct sk_buff *skb, int len)
 {
 	struct isotp_sock *so = isotp_sk(sk);
 	struct sk_buff *nskb;
@@ -374,18 +369,18 @@ static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
 
-	if (!len || len > cf->len - N_PCI_SZ - ae)
+	if (!len || len > cf->len - N_PCI_SZ - ae - esc)
 		return 1;
 
 	if ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
-	    check_pad(so, cf, N_PCI_SZ + ae + len, so->opt.rxpad_content))
+	    check_pad(so, cf, N_PCI_SZ + ae + esc + len, so->opt.rxpad_content))
 		return 1;
 
 	nskb = alloc_skb(len, gfp_any());
 	if (!nskb)
 		return 1;
 
-	memcpy(skb_put(nskb, len), &cf->data[N_PCI_SZ + ae], len);
+	memcpy(skb_put(nskb, len), &cf->data[N_PCI_SZ + ae + esc], len);
 
 	nskb->tstamp = skb->tstamp;
 	nskb->dev = skb->dev;
@@ -528,7 +523,7 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 	struct isotp_sock *so = isotp_sk(sk);
 	struct canfd_frame *cf;
 	int ae = (so->opt.flags & CAN_ISOTP_EXTEND_ADDR)? 1:0;
-	u8 n_pci_type;
+	u8 n_pci_type, sf_dl;
 
 	BUG_ON(skb->len != CAN_MTU && skb->len != CANFD_MTU);
 
@@ -560,29 +555,33 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 		isotp_rcv_fc(so, cf, ae);
 		break;
 
-	case N_PCI_SF8:
+	case N_PCI_SF:
 		/*
-		 * rx path: single frame with LL_DL == 8
+		 * rx path: single frame
 		 *
 		 * As we do not have a rx.ll_dl configuration, we can only test
 		 * if the CAN frames payload length matches the LL_DL == 8
 		 * requirements - no matter if it's CAN 2.0 or CAN FD
 		 */
-		if (cf->len <= CAN_MAX_DLEN)
-			isotp_rcv_sf(sk, cf, ae, skb, cf->data[ae] & 0x0F);
-		break;
 
-	case N_PCI_SFX_00:
-	case N_PCI_SFX_01:
-	case N_PCI_SFX_10:
-	case N_PCI_SFX_11:
-		/*
-		 * rx path: single frame with LL_DL > 8
-		 *
-		 * Only CAN FD frames are allowed with these N_PCI values.
-		 */
-		if (skb->len == CANFD_MTU)
-			isotp_rcv_sf(sk, cf, ae, skb, cf->data[ae] & 0x3F);
+		/* get the SF_DL from the N_PCI byte */
+		sf_dl = cf->data[ae] & 0x0F;
+
+		if (cf->len <= CAN_MAX_DLEN)
+			isotp_rcv_sf(sk, cf, ae, 0, skb, sf_dl);
+		else if (skb->len == CANFD_MTU) {
+			/*
+			 * We have a CAN FD frame and CAN_DL is greater than 8:
+			 * Only frames with the SF_DL == 0 ESC value are valid.
+			 *
+			 * If so set the esc parameter to 1 to point to the
+			 * message content behind the extended SF_DL and get
+			 * that real SF_DL length info from cf->data[ae + 1]
+			 */
+			if (sf_dl == 0)
+				isotp_rcv_sf(sk, cf, ae, 1, skb,
+					     cf->data[ae + 1]);
+		}
 		break;
 
 	case N_PCI_FF:
@@ -599,14 +598,15 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 }
 
 static void isotp_fill_dataframe(struct canfd_frame *cf, struct isotp_sock *so,
-				 int ae)
+				 int ae, int off)
 {
-	unsigned char space = so->tx.ll_dl - N_PCI_SZ - ae;
+	int pcilen = N_PCI_SZ + ae + off;
+	int space = so->tx.ll_dl - pcilen;
 	int num = min_t(int, so->tx.len - so->tx.idx, space);
 	int i;
 
 	cf->can_id = so->txid;
-	cf->len = num + N_PCI_SZ + ae;
+	cf->len = num + pcilen;
 
 	if (num < space) {
 		if (so->opt.flags & CAN_ISOTP_TX_PADDING) {
@@ -622,7 +622,7 @@ static void isotp_fill_dataframe(struct canfd_frame *cf, struct isotp_sock *so,
 	}
 
 	for (i = 0; i < num; i++)
-		cf->data[i + ae + 1] = so->tx.buf[so->tx.idx++];
+		cf->data[pcilen + i] = so->tx.buf[so->tx.idx++];
 
 	if (ae)
 		cf->data[0] = so->opt.ext_address;
@@ -700,7 +700,7 @@ isotp_tx_burst:
 		skb_put(skb, so->ll.mtu);
 
 		/* create consecutive frame */
-		isotp_fill_dataframe(cf, so, ae);
+		isotp_fill_dataframe(cf, so, ae, 0);
 
 		/* place consecutive frame N_PCI in appropriate index */
 		cf->data[ae] = N_PCI_CF | so->tx.sn++;
@@ -768,6 +768,7 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 	struct net_device *dev;
 	struct canfd_frame *cf;
 	int ae = (so->opt.flags & CAN_ISOTP_EXTEND_ADDR)? 1:0;
+	int off;
 	int err;
 
 	if (!so->bound)
@@ -807,16 +808,35 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 	cf = (struct canfd_frame *)skb->data;
 	skb_put(skb, so->ll.mtu);
 
-	/* check for single frame transmission */
-	if (size <= so->tx.ll_dl - N_PCI_SZ - ae) {
+	/* take care of a potential SF_DL ESC offset for TX_DL > 8 */
+	off = (so->tx.ll_dl > CAN_MAX_DLEN)? 1:0;
 
-		isotp_fill_dataframe(cf, so, ae);
+	/* check for single frame transmission depending on TX_DL */
+	if (size <= so->tx.ll_dl - N_PCI_SZ - ae - off) {
 
-		/* place single frame N_PCI in appropriate index */
-		if (so->tx.ll_dl == CAN_MAX_DLEN)
-			cf->data[ae] = size | N_PCI_SF8;
+		/*
+		 * The message size generally fits into a SingleFrame - good.
+		 *
+		 * SF_DL ESC offset optimization:
+		 *
+		 * When TX_DL is greater 8 but the message would still fit
+		 * into a 8 byte CAN frame, we can omit the offset.
+		 * This prevents a protocol caused length extension from
+		 * CAN_DL = 8 to CAN_DL = 12 due to the SF_SL ESC handling.
+		 */
+		if (size <= CAN_MAX_DLEN - N_PCI_SZ - ae)
+			off = 0;
+
+		isotp_fill_dataframe(cf, so, ae, off);
+
+		/* place single frame N_PCI w/o length in appropriate index */
+		cf->data[ae] = N_PCI_SF;
+
+		/* place SF_DL size value depending on the SF_DL ESC offset */
+		if (off)
+			cf->data[ae + 1] = size;
 		else
-			cf->data[ae] = size | N_PCI_SFX;
+			cf->data[ae] |= size;
 
 		so->tx.state = ISOTP_IDLE;
 		wake_up_interruptible(&so->wait);
