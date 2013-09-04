@@ -111,6 +111,7 @@ MODULE_ALIAS("can-proto-6");
 #define N_PCI_SFX_11	(N_PCI_SFX + 0x30) /* single frame 0b0111 of 0b01xx */
 
 #define N_PCI_SZ 1	/* size of the PCI byte #1 */
+#define FF_PCI_SZ 2    /* size of the FirstFrame PCI including the FF_DL */
 
 /* Flow Status given in FC frame */
 #define ISOTP_FC_CTS	0	/* clear to send */
@@ -407,15 +408,16 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 	if (cf->len != so->rx.ll_dl)
 		return 1;
 
+	/* get the FF_DL */
 	so->rx.len = (cf->data[ae] & 0x0F) << 8;
 	so->rx.len += cf->data[ae + 1];
 
-	if (so->rx.len + ae < so->rx.ll_dl)
+	if (so->rx.len + ae + FF_PCI_SZ < so->rx.ll_dl)
 		return 1;
 
 	/* copy the first received data bytes */
 	so->rx.idx = 0;
-	for (i = ae + 2; i < so->rx.ll_dl; i++)
+	for (i = ae + FF_PCI_SZ; i < so->rx.ll_dl; i++)
 		so->rx.buf[so->rx.idx++] = cf->data[i];
 
 	/* initial setup for this pdu receiption */
@@ -641,7 +643,7 @@ static void isotp_create_fframe(struct canfd_frame *cf, struct isotp_sock *so,
 	cf->data[ae + 1] = (u8) so->tx.len & 0xFFU;
 
 	/* add first data bytes depending on ae */
-	for (i = ae + 2; i < so->tx.ll_dl; i++)
+	for (i = ae + FF_PCI_SZ; i < so->tx.ll_dl; i++)
 		cf->data[i] = so->tx.buf[so->tx.idx++];
 
 	so->tx.sn = 1;
