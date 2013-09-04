@@ -111,7 +111,7 @@ MODULE_ALIAS("can-proto-6");
 #define N_PCI_SFX_11	(N_PCI_SFX + 0x30) /* single frame 0b0111 of 0b01xx */
 
 #define N_PCI_SZ 1	/* size of the PCI byte #1 */
-#define FF_PCI_SZ 2    /* size of the FirstFrame PCI including the FF_DL */
+#define FF_PCI_SZ 2	/* size of the FirstFrame PCI including the FF_DL */
 
 /* Flow Status given in FC frame */
 #define ISOTP_FC_CTS	0	/* clear to send */
