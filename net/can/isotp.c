@@ -392,6 +392,7 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 {
 	struct isotp_sock *so = isotp_sk(sk);
 	int i;
+	int off;
 
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
@@ -407,7 +408,10 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 	so->rx.len = (cf->data[ae] & 0x0F) << 8;
 	so->rx.len += cf->data[ae + 1];
 
-	if (so->rx.len + ae + FF_PCI_SZ < so->rx.ll_dl)
+	/* take care of a potential SF_DL ESC offset for TX_DL > 8 */
+	off = (so->rx.ll_dl > CAN_MAX_DLEN)? 1:0;
+
+	if (so->rx.len + ae + off + FF_PCI_SZ < so->rx.ll_dl)
 		return 1;
 
 	/* copy the first received data bytes */
