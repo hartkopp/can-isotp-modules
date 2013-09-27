@@ -238,8 +238,6 @@ static void isotp_rcv_skb(struct sk_buff *skb, struct sock *sk)
 
 	BUILD_BUG_ON(sizeof(skb->cb) < sizeof(struct sockaddr_can));
 
-	skb->sk = sk;
-
 	memset(addr, 0, sizeof(*addr));
 	addr->can_family  = AF_CAN;
 	addr->can_ifindex = skb->dev->ifindex;
