@@ -178,6 +178,20 @@ static enum hrtimer_restart isotp_rx_timer_handler(struct hrtimer *hrtimer)
 	return HRTIMER_NORESTART;
 }
 
+static void isotp_skb_destructor(struct sk_buff *skb)
+{
+	sock_put(skb->sk);
+}
+
+static inline void isotp_skb_set_owner(struct sk_buff *skb, struct sock *sk)
+{
+	if (sk) {
+		sock_hold(sk);
+		skb->destructor = isotp_skb_destructor;
+		skb->sk = sk;
+	}
+}
+
 static int isotp_send_fc(struct sock *sk, int ae)
 {
 	struct net_device *dev;
@@ -195,7 +209,7 @@ static int isotp_send_fc(struct sock *sk, int ae)
 		return 1;
 	}
 	nskb->dev = dev;
-	nskb->sk = sk;
+	isotp_skb_set_owner(nskb, sk);
 	ncf = (struct canfd_frame *) nskb->data;
 	skb_put(nskb, so->ll.mtu);
 
@@ -713,7 +727,7 @@ isotp_tx_burst:
 			cf->flags = so->ll.tx_flags;
 
 		skb->dev = dev;
-		skb->sk  = sk;
+		isotp_skb_set_owner(skb, sk);
 		can_send(skb, 1);
 
 		if (so->tx.idx >= so->tx.len) {
