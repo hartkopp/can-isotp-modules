@@ -553,7 +553,7 @@ static void isotp_rcv(struct sk_buff *skb, void *data)
 	cf = (struct canfd_frame *) skb->data;
 
 	/* if enabled: check receiption of my configured extended address */
-	if (ae && cf->data[0] != so->opt.ext_address)
+	if (ae && cf->data[0] != so->opt.rx_ext_address)
 		return;
 
 	n_pci_type = cf->data[ae] & 0xF0;
@@ -1095,6 +1095,10 @@ static int isotp_setsockopt(struct socket *sock, int level, int optname,
 
 		if (copy_from_user(&so->opt, optval, optlen))
 			return -EFAULT;
+
+		/* no separate rx_ext_address is given => use ext_address */
+		if (!(so->opt.flags & CAN_ISOTP_RX_EXT_ADDR))
+			so->opt.rx_ext_address = so->opt.ext_address;
 		break;
 
 	case CAN_ISOTP_RECV_FC:
@@ -1267,6 +1271,7 @@ static int isotp_init(struct sock *sk)
 
 	so->opt.flags		= CAN_ISOTP_DEFAULT_FLAGS;
 	so->opt.ext_address	= CAN_ISOTP_DEFAULT_EXT_ADDRESS;
+	so->opt.rx_ext_address	= CAN_ISOTP_DEFAULT_EXT_ADDRESS;
 	so->opt.rxpad_content	= CAN_ISOTP_DEFAULT_PAD_CONTENT;
 	so->opt.txpad_content	= CAN_ISOTP_DEFAULT_PAD_CONTENT;
 	so->opt.frame_txtime	= CAN_ISOTP_DEFAULT_FRAME_TXTIME;
