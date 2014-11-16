@@ -77,7 +77,7 @@
 #include <socketcan/can/version.h> /* for RCSID. Removed by mkpatch script */
 RCSID("$Id$");
 
-#define CAN_ISOTP_VERSION "20130731"
+#define CAN_ISOTP_VERSION "20141116"
 static __initdata const char banner[] =
 	KERN_INFO "can: isotp protocol (rev " CAN_ISOTP_VERSION " alpha)\n";
 
@@ -99,6 +99,14 @@ MODULE_ALIAS("can-proto-6");
 			 (CAN_EFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG) : \
 			 (CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG))
 
+/*
+  ISO 15765-2:2015 supports more than 4095 byte per ISO PDU as the FF_DL can
+  take full 32 bit values (4 Gbyte). We would need some good concept to handle
+  this between user space and kernel space. For now increase the static buffer
+  to something about 8 kbyte to be able to test this new functionality.
+*/
+#define MAX_MSG_LENGTH 8200
+
 /* N_PCI type values in bits 7-4 of N_PCI bytes */
 #define N_PCI_SF	0x00 /* single frame */
 #define N_PCI_FF	0x10 /* first frame */
@@ -106,7 +114,8 @@ MODULE_ALIAS("can-proto-6");
 #define N_PCI_FC	0x30 /* flow control */
 
 #define N_PCI_SZ 1	/* size of the PCI byte #1 */
-#define FF_PCI_SZ 2	/* size of the FirstFrame PCI including the FF_DL */
+#define FF_PCI_SZ12 2	/* size of FirstFrame PCI including 12 bit FF_DL */
+#define FF_PCI_SZ32 6	/* size of FirstFrame PCI including 32 bit FF_DL */
 
 /* Flow Status given in FC frame */
 #define ISOTP_FC_CTS	0	/* clear to send */
@@ -128,9 +137,9 @@ struct tpcon {
 	u8  bs;
 	u8  sn;
 	u8  ll_dl;
-	u8  buf[4096];
+	u8  buf[MAX_MSG_LENGTH+1];
 };
- 
+
 struct isotp_sock {
 	struct sock sk;
 	int bound;
@@ -192,7 +201,7 @@ static inline void isotp_skb_set_owner(struct sk_buff *skb, struct sock *sk)
 	}
 }
 
-static int isotp_send_fc(struct sock *sk, int ae)
+static int isotp_send_fc(struct sock *sk, int ae, u8 flowstatus)
 {
 	struct net_device *dev;
 	struct sk_buff *nskb;
@@ -222,7 +231,7 @@ static int isotp_send_fc(struct sock *sk, int ae)
 	} else
 		ncf->len = ae + 3;
 
-	ncf->data[ae] = N_PCI_FC | ISOTP_FC_CTS;
+	ncf->data[ae] = N_PCI_FC | flowstatus;
 	ncf->data[ae + 1] = so->rxfc.bs;
 	ncf->data[ae + 2] = so->rxfc.stmin;
 
@@ -405,6 +414,7 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 	struct isotp_sock *so = isotp_sk(sk);
 	int i;
 	int off;
+	int ff_pci_sz;
 
 	hrtimer_cancel(&so->rxtimer);
 	so->rx.state = ISOTP_IDLE;
@@ -420,15 +430,33 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 	so->rx.len = (cf->data[ae] & 0x0F) << 8;
 	so->rx.len += cf->data[ae + 1];
 
+	/* Check for FF_DL escape sequence supporting 32 bit PDU length */
+	if (so->rx.len)
+		ff_pci_sz = FF_PCI_SZ12;
+	else {
+		/* FF_DL = 0 => get real length from next 4 bytes */
+		so->rx.len = cf->data[ae + 2] << 24;
+		so->rx.len += cf->data[ae + 3] << 16;
+		so->rx.len += cf->data[ae + 4] << 8;
+		so->rx.len += cf->data[ae + 5];
+		ff_pci_sz = FF_PCI_SZ32;
+	}
+
 	/* take care of a potential SF_DL ESC offset for TX_DL > 8 */
 	off = (so->rx.ll_dl > CAN_MAX_DLEN)? 1:0;
 
-	if (so->rx.len + ae + off + FF_PCI_SZ < so->rx.ll_dl)
+	if (so->rx.len + ae + off + ff_pci_sz < so->rx.ll_dl)
 		return 1;
+
+	if (so->rx.len > MAX_MSG_LENGTH) {
+		/* send FC frame with overflow status */
+		isotp_send_fc(sk, ae, ISOTP_FC_OVFLW);
+		return 1;
+	}
 
 	/* copy the first received data bytes */
 	so->rx.idx = 0;
-	for (i = ae + FF_PCI_SZ; i < so->rx.ll_dl; i++)
+	for (i = ae + ff_pci_sz; i < so->rx.ll_dl; i++)
 		so->rx.buf[so->rx.idx++] = cf->data[i];
 
 	/* initial setup for this pdu receiption */
@@ -440,7 +468,7 @@ static int isotp_rcv_ff(struct sock *sk, struct canfd_frame *cf, int ae)
 		return 0;
 
 	/* send our first FC frame */
-	isotp_send_fc(sk, ae);
+	isotp_send_fc(sk, ae, ISOTP_FC_CTS);
 	return 0;
 }
 
@@ -529,7 +557,7 @@ static int isotp_rcv_cf(struct sock *sk, struct canfd_frame *cf, int ae,
 	}
 
 	/* we reached the specified blocksize so->rxfc.bs */
-	isotp_send_fc(sk, ae);
+	isotp_send_fc(sk, ae, ISOTP_FC_CTS);
 	return 0;
 }
 
@@ -648,18 +676,32 @@ static void isotp_create_fframe(struct canfd_frame *cf, struct isotp_sock *so,
 				int ae)
 {
 	int i;
+	int ff_pci_sz;
 
 	cf->can_id = so->txid;
 	cf->len = so->tx.ll_dl;
 	if (ae)
 		cf->data[0] = so->opt.ext_address;
 
-	/* N_PCI bytes with FF_DL data length */
-	cf->data[ae] = (u8) (so->tx.len>>8) | N_PCI_FF;
-	cf->data[ae + 1] = (u8) so->tx.len & 0xFFU;
+	/* create N_PCI bytes with 12/32 bit FF_DL data length */
+	if (so->tx.len > 4095) {
+		/* use 32 bit FF_DL notation */
+		cf->data[ae] = N_PCI_FF;
+		cf->data[ae + 1] = 0;
+		cf->data[ae + 2] = (u8) (so->tx.len >> 24) & 0xFFU;;
+		cf->data[ae + 3] = (u8) (so->tx.len >> 16) & 0xFFU;;
+		cf->data[ae + 4] = (u8) (so->tx.len >> 8) & 0xFFU;;
+		cf->data[ae + 5] = (u8) so->tx.len & 0xFFU;;
+		ff_pci_sz = FF_PCI_SZ32;
+	} else {
+		/* use 12 bit FF_DL notation */
+		cf->data[ae] = (u8) (so->tx.len>>8) | N_PCI_FF;
+		cf->data[ae + 1] = (u8) so->tx.len & 0xFFU;
+		ff_pci_sz = FF_PCI_SZ12;
+	}
 
 	/* add first data bytes depending on ae */
-	for (i = ae + FF_PCI_SZ; i < so->tx.ll_dl; i++)
+	for (i = ae + ff_pci_sz; i < so->tx.ll_dl; i++)
 		cf->data[i] = so->tx.buf[so->tx.idx++];
 
 	so->tx.sn = 1;
@@ -799,7 +841,7 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 		wait_event_interruptible(so->wait, so->tx.state == ISOTP_IDLE);
 	}
 
-	if (!size || size > 4095)
+	if (!size || size > MAX_MSG_LENGTH)
 		return -EINVAL;
 
 	err = memcpy_fromiovec(so->tx.buf, msg->msg_iov, size);
