@@ -116,6 +116,7 @@ MODULE_ALIAS("can-proto-6");
 #define N_PCI_SZ 1	/* size of the PCI byte #1 */
 #define FF_PCI_SZ12 2	/* size of FirstFrame PCI including 12 bit FF_DL */
 #define FF_PCI_SZ32 6	/* size of FirstFrame PCI including 32 bit FF_DL */
+#define FC_CONTENT_SZ 3	/* flow control content size in byte (FS/BS/STmin) */
 
 /* Flow Status given in FC frame */
 #define ISOTP_FC_CTS	0	/* clear to send */
@@ -229,7 +230,7 @@ static int isotp_send_fc(struct sock *sk, int ae, u8 flowstatus)
 		memset(ncf->data, so->opt.rxpad_content, CAN_MAX_DLEN);
 		ncf->len = CAN_MAX_DLEN;
 	} else
-		ncf->len = ae + 3;
+		ncf->len = ae + FC_CONTENT_SZ;
 
 	ncf->data[ae] = N_PCI_FC | flowstatus;
 	ncf->data[ae + 1] = so->rxfc.bs;
@@ -313,8 +314,9 @@ static int isotp_rcv_fc(struct isotp_sock *so, struct canfd_frame *cf, int ae)
 
 	hrtimer_cancel(&so->txtimer);
 
-	if ((so->opt.flags & CAN_ISOTP_TX_PADDING) &&
-	    check_pad(so, cf, ae + 3, so->opt.txpad_content)) {
+	if ((cf->len < ae + FC_CONTENT_SZ) ||
+	    ((so->opt.flags & CAN_ISOTP_TX_PADDING) &&
+	     check_pad(so, cf, ae + FC_CONTENT_SZ, so->opt.txpad_content))) {
 		so->tx.state = ISOTP_IDLE;
 		wake_up_interruptible(&so->wait);
 		return 1;
