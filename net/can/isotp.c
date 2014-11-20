@@ -226,8 +226,8 @@ static int isotp_send_fc(struct sock *sk, int ae, u8 flowstatus)
 	/* create & send flow control reply */
 	ncf->can_id = so->txid;
 
-	if (so->opt.flags & CAN_ISOTP_RX_PADDING) {
-		memset(ncf->data, so->opt.rxpad_content, CAN_MAX_DLEN);
+	if (so->opt.flags & CAN_ISOTP_TX_PADDING) {
+		memset(ncf->data, so->opt.txpad_content, CAN_MAX_DLEN);
 		ncf->len = CAN_MAX_DLEN;
 	} else
 		ncf->len = ae + FC_CONTENT_SZ;
@@ -315,8 +315,8 @@ static int isotp_rcv_fc(struct isotp_sock *so, struct canfd_frame *cf, int ae)
 	hrtimer_cancel(&so->txtimer);
 
 	if ((cf->len < ae + FC_CONTENT_SZ) ||
-	    ((so->opt.flags & CAN_ISOTP_TX_PADDING) &&
-	     check_pad(so, cf, ae + FC_CONTENT_SZ, so->opt.txpad_content))) {
+	    ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
+	     check_pad(so, cf, ae + FC_CONTENT_SZ, so->opt.rxpad_content))) {
 		so->tx.state = ISOTP_IDLE;
 		wake_up_interruptible(&so->wait);
 		return 1;
