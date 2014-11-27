@@ -290,8 +290,7 @@ static u8 padlen(u8 datalen)
 }
 
 /* check for length optimization and return 1/true when the check fails */
-static int check_optimized(struct isotp_sock *so, struct canfd_frame *cf,
-			   int start_index)
+static int check_optimized(struct canfd_frame *cf, int start_index)
 {
 	/*
 	 * for CAN_DL <= 8 the start_index is equal to the CAN_DL as the
@@ -322,7 +321,7 @@ static int check_pad(struct isotp_sock *so, struct canfd_frame *cf,
 	if (!(so->opt.flags & CAN_ISOTP_RX_PADDING)) {
 
 		if (so->opt.flags & CAN_ISOTP_CHK_PAD_LEN)
-			return check_optimized(so, cf, start_index);
+			return check_optimized(cf, start_index);
 
 		/* no valid test against empty value => ignore frame */
 		return 1;
