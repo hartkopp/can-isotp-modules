@@ -118,6 +118,8 @@ MODULE_ALIAS("can-proto-6");
 #define FF_PCI_SZ32 6	/* size of FirstFrame PCI including 32 bit FF_DL */
 #define FC_CONTENT_SZ 3	/* flow control content size in byte (FS/BS/STmin) */
 
+#define ISOTP_CHECK_PADDING (CAN_ISOTP_CHK_PAD_LEN | CAN_ISOTP_CHK_PAD_DATA)
+
 /* Flow Status given in FC frame */
 #define ISOTP_FC_CTS	0	/* clear to send */
 #define ISOTP_FC_WT	1	/* wait */
@@ -287,10 +289,44 @@ static u8 padlen(u8 datalen)
 	return plen[datalen];
 }
 
+/* check for length optimization and return 1/true when the check fails */
+static int check_optimized(struct isotp_sock *so, struct canfd_frame *cf,
+			   int start_index)
+{
+	/*
+	 * for CAN_DL <= 8 the start_index is equal to the CAN_DL as the
+	 * padding would start at this point. E.g. if the padding would
+	 * start at cf.data[7] cf->len has to be 7 to be optimal.
+	 * Note: The data[] index starts with zero.
+	 */
+	if (cf->len <= CAN_MAX_DLEN)
+		return (cf->len != start_index);
+
+	/*
+	 * This relation is also valid in the non-linear DLC range, where
+	 * we need to take care of the minimal next possible CAN_DL.
+	 * The correct check would be (padlen(cf->len) != padlen(start_index)).
+	 * But as cf->len can only take discrete values from 12, .., 64 at this
+	 * point the padlen(cf->len) is always equal to cf->len.
+	 */
+	return (cf->len != padlen(start_index));
+}
+
+/* check padding and return 1/true when the check fails */
 static int check_pad(struct isotp_sock *so, struct canfd_frame *cf,
 		     int start_index, __u8 content)
 {
 	int i;
+
+	/* no RX_PADDING value => check length of optimized frame length */
+	if (!(so->opt.flags & CAN_ISOTP_RX_PADDING)) {
+
+		if (so->opt.flags & CAN_ISOTP_CHK_PAD_LEN)
+			return check_optimized(so, cf, start_index);
+
+		/* no valid test against empty value => ignore frame */
+		return 1;
+	}
 
 	/* check datalength of correctly padded CAN frame */
 	if ((so->opt.flags & CAN_ISOTP_CHK_PAD_LEN) &&
@@ -315,7 +351,7 @@ static int isotp_rcv_fc(struct isotp_sock *so, struct canfd_frame *cf, int ae)
 	hrtimer_cancel(&so->txtimer);
 
 	if ((cf->len < ae + FC_CONTENT_SZ) ||
-	    ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
+	    ((so->opt.flags & ISOTP_CHECK_PADDING) &&
 	     check_pad(so, cf, ae + FC_CONTENT_SZ, so->opt.rxpad_content))) {
 		so->tx.state = ISOTP_IDLE;
 		wake_up_interruptible(&so->wait);
@@ -395,7 +431,7 @@ static int isotp_rcv_sf(struct sock *sk, struct canfd_frame *cf, int ae,
 	if (!len || len > cf->len - N_PCI_SZ - ae - esc)
 		return 1;
 
-	if ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
+	if ((so->opt.flags & ISOTP_CHECK_PADDING) &&
 	    check_pad(so, cf, N_PCI_SZ + ae + esc + len, so->opt.rxpad_content))
 		return 1;
 
@@ -528,7 +564,7 @@ static int isotp_rcv_cf(struct sock *sk, struct canfd_frame *cf, int ae,
 		/* we are done */
 		so->rx.state = ISOTP_IDLE;
 
-		if ((so->opt.flags & CAN_ISOTP_RX_PADDING) &&
+		if ((so->opt.flags & ISOTP_CHECK_PADDING) &&
 		    check_pad(so, cf, i+1, so->opt.rxpad_content))
 			return 1;
 
