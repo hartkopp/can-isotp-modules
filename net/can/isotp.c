@@ -884,7 +884,11 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 	if (!size || size > MAX_MSG_LENGTH)
 		return -EINVAL;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,19,0)
+	err = memcpy_from_msg(so->tx.buf, msg, size);
+#else
 	err = memcpy_fromiovec(so->tx.buf, msg->msg_iov, size);
+#endif
 	if (err < 0)
 		return err;
 
@@ -982,7 +986,11 @@ static int isotp_recvmsg(struct kiocb *iocb, struct socket *sock,
 	else
 		size = skb->len;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,19,0)
+	err = memcpy_to_msg(msg, skb->data, size);
+#else
 	err = memcpy_toiovec(msg->msg_iov, skb->data, size);
+#endif
 	if (err < 0) {
 		skb_free_datagram(sk, skb);
 		return err;
