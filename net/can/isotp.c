@@ -857,8 +857,12 @@ static enum hrtimer_restart isotp_tx_timer_handler(struct hrtimer *hrtimer)
 	return HRTIMER_NORESTART;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+static int isotp_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
+#else
 static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 		       struct msghdr *msg, size_t size)
+#endif
 {
 	struct sock *sk = sock->sk;
 	struct isotp_sock *so = isotp_sk(sk);
@@ -966,8 +970,13 @@ static int isotp_sendmsg(struct kiocb *iocb, struct socket *sock,
 	return size;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+static int isotp_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
+			 int flags)
+#else
 static int isotp_recvmsg(struct kiocb *iocb, struct socket *sock,
 			 struct msghdr *msg, size_t size, int flags)
+#endif
 {
 	struct sock *sk = sock->sk;
 	struct sk_buff *skb;
