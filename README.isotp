@@ -224,8 +224,11 @@ Readme file for ISO 15765-2 CAN transport protocol for protocol family CAN
   socket options, it is recommended to have an appropriate tx queue available
   in the CAN driver, e.g.:
 
-  echo 4000 > /sys/class/net/can0/tx_queue_len
+    echo 4000 > /sys/class/net/can0/tx_queue_len
 
+  or with the 'ip' tool from the iproute2 package
+
+    ip link set can0 txqueuelen 4000
 
   3.2 State of the Socket API for this Linux CAN ISO-TP implementation
 
