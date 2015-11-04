@@ -2,6 +2,27 @@
 
 README.isotp
 
+DOWNLOAD and BUILD
+
+1. Download repository
+
+   git clone https://github.com/hartkopp/can-isotp-modules.git
+
+2. Build ISO-TP kernel module
+
+   cd can-isotp-modules/net/can
+   ./make_isotp.sh
+
+   Remark: The other CAN sources are out of date and will not compile with
+           recent Linux versions. make_isotp.sh compiles can-isotp.ko only.
+
+3. When the PF_CAN core module is loaded ('modprobe can') the ISO-TP module
+   can be loaded into the kernel with
+
+   insmod ./can-isotp.ko
+
+----------------------------------------------------------------------------
+
 Readme file for ISO 15765-2 CAN transport protocol for protocol family CAN
 
 
