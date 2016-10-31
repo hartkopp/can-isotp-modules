@@ -77,7 +77,7 @@
 #include <socketcan/can/version.h> /* for RCSID. Removed by mkpatch script */
 RCSID("$Id$");
 
-#define CAN_ISOTP_VERSION "20141116"
+#define CAN_ISOTP_VERSION "20161031"
 static __initdata const char banner[] =
 	KERN_INFO "can: isotp protocol (rev " CAN_ISOTP_VERSION " alpha)\n";
 
@@ -1311,10 +1311,17 @@ static int isotp_getsockopt(struct socket *sock, int level, int optname,
 }
 
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)
+static int isotp_notifier(struct notifier_block *nb, unsigned long msg,
+			  void *ptr)
+{
+	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+#else
 static int isotp_notifier(struct notifier_block *nb,
 			unsigned long msg, void *data)
 {
 	struct net_device *dev = (struct net_device *)data;
+#endif
 	struct isotp_sock *so = container_of(nb, struct isotp_sock, notifier);
 	struct sock *sk = &so->sk;
 
