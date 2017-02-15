@@ -389,7 +389,11 @@ static int isotp_rcv_fc(struct isotp_sock *so, struct canfd_frame *cf, int ae)
 
 	DBG("FC frame: FS %d, BS %d, STmin 0x%02X, tx_gap %lld\n",
 	    cf->data[ae] & 0x0F & 0x0F, so->txfc.bs, so->txfc.stmin,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
+	    (long long)so->tx_gap);
+#else
 	    (long long)so->tx_gap.tv64);
+#endif
 
 	switch (cf->data[ae] & 0x0F) {
 
@@ -833,8 +837,13 @@ isotp_tx_burst:
 		} 
 
 		/* no gap between data frames needed => use burst mode */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
+		if (!so->tx_gap)
+			goto isotp_tx_burst;
+#else
 		if (!so->tx_gap.tv64)
 			goto isotp_tx_burst;
+#endif
 
 		/* start timer to send next data frame with correct delay */
 		dev_put(dev);
