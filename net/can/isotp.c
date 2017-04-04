@@ -732,10 +732,10 @@ static void isotp_create_fframe(struct canfd_frame *cf, struct isotp_sock *so,
 		/* use 32 bit FF_DL notation */
 		cf->data[ae] = N_PCI_FF;
 		cf->data[ae + 1] = 0;
-		cf->data[ae + 2] = (u8) (so->tx.len >> 24) & 0xFFU;;
-		cf->data[ae + 3] = (u8) (so->tx.len >> 16) & 0xFFU;;
-		cf->data[ae + 4] = (u8) (so->tx.len >> 8) & 0xFFU;;
-		cf->data[ae + 5] = (u8) so->tx.len & 0xFFU;;
+		cf->data[ae + 2] = (u8) (so->tx.len >> 24) & 0xFFU;
+		cf->data[ae + 3] = (u8) (so->tx.len >> 16) & 0xFFU;
+		cf->data[ae + 4] = (u8) (so->tx.len >> 8) & 0xFFU;
+		cf->data[ae + 5] = (u8) so->tx.len & 0xFFU;
 		ff_pci_sz = FF_PCI_SZ32;
 	} else {
 		/* use 12 bit FF_DL notation */
